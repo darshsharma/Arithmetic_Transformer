@@ -1,0 +1,115 @@
+# Pythia-1B CONTINUED Training Configuration
+# Resuming from 30k iterations checkpoint
+
+# ===== Model Selection ===== #
+use_llama = True
+llama_model_name = "EleutherAI/pythia-1b"
+
+# ===== Evaluation Settings ===== #
+eval_interval = 2000  # Evaluate every 2000 iterations
+eval_iters = 1
+always_save_checkpoint = False  # Don't save checkpoint at every eval (saves disk space)
+
+# Disable early evaluation (model already trained)
+more_early_eval1 = False
+more_early_eval2 = False
+
+# ===== WandB Logging ===== #
+wandb_log = True
+wandb_project = 'addition_pythia'
+wandb_run_name = '4_operands_pythia_1b_plain_continued'  # New run name to track continuation
+
+# ===== Model Architecture (Pythia-specific) ===== #
+block_size = 64
+dropout = 0.1
+
+# ===== Training Configuration ===== #
+batch_size = 128
+gradient_accumulation_steps = 1
+
+# ===== Data Format ===== #
+data_format = 'plain'
+operator = '+'
+dataset = 'bal'
+
+# ===== Initialization - RESUME MODE ===== #
+init_from = 'resume'  # Resume from checkpoint
+resume_iter = True  # Continue from saved iteration number (will start at 30000)
+iter_num = 0  # This will be overridden by checkpoint value when resume_iter=True
+ckpt_path_name = 'ckpt_final.pt'  # Checkpoint to resume from
+
+# ===== Task Settings ===== #
+num_digit = 3
+max_new_tokens = 6
+drop_leading_digit = False
+zero_pad = False
+
+# ===== Learning Rate - CONTINUED FROM ITER 30K ===== #
+# At iter 30k with original schedule: LR had decayed to 1e-5 (min_lr)
+# Continuing with same LR - will decay from 1e-5 to 1e-6 over next 20k iterations
+learning_rate = 1e-5  # Continue from where iter 30k left off
+max_iters = 80000  # Total iterations: will train from 30k to 50k (20k more iterations)
+lr_decay_iters = 80000  # Match max_iters for continued cosine decay
+beta1 = 0.9
+beta2 = 0.999
+warmup_iters = 0  # No warmup - seamless continuation
+weight_decay = 1e-1  # KEEP SAME - critical for preventing overfitting
+grad_clip = 1.0
+
+# ===== Device ===== #
+device = 'cuda:0'
+dtype = 'bfloat16'
+compile = True
+
+# ===== Paths ===== #
+out_dir = '/content/drive/MyDrive/addition_1/4_operands_0_to_999_uniform/pythia_out_plain'
+data_dir = '/content/drive/MyDrive/addition/data/4_operands_0_to_999_uniform/'
+
+# ===== Data Files ===== #
+train_data_name = 'train.txt'
+val_data_name = 'val.txt'
+test_file_name = 'test.txt'
+main_test_name = "test"
+
+# ===== Evaluation Settings ===== #
+eval_addition = True
+eval_addition_train = True
+train_data_test_name = "train_eval.txt"
+
+# Mode for evaluation: "compute_gold" or "read_gold_as_str"
+mode = "read_gold_as_str"
+
+# ===== Statistical Measurements ===== #
+mi_measurement = False
+
+# ===== Additional Settings ===== #
+eval_only = False
+save_final = True  # Will save final checkpoint at end of training
+use_flash = True
+
+# ===== Notes ===== #
+# CHECKPOINT SAVING STRATEGY:
+# - always_save_checkpoint = False: Don't save at every eval (saves ~2GB per checkpoint)
+# - save_final = True: Will save final checkpoint when training completes
+# - Best accuracy checkpoints: Still saved automatically (see train.py:982-994)
+#   when test_accuracy improves (every 5 iterations)
+#
+# EVALUATION RESULTS:
+# - CSV files are ALWAYS saved regardless of checkpoint settings:
+#   - training_metrics.csv: Loss and accuracy over time
+#   - correct_examples.csv: Examples the model got right
+#   - incorrect_examples.csv: Examples the model got wrong
+#   - digitwise_errors.png: Error analysis visualization
+#
+# RESUMING CONFIGURATION:
+# - Make sure ckpt_final.pt exists in out_dir before running
+# - Will automatically start from iteration 30000 and train to 50000
+# - LR continues from 1e-5 (where iter 30k ended) → decays to 1e-6
+# - No warmup - seamless continuation from previous training
+# - Weight decay KEPT at 1e-1 for regularization (prevents overfitting)
+#
+# LEARNING RATE STRATEGY (Option 1 - Conservative):
+# - Continues with exact LR from iter 30k (1e-5)
+# - Ensures seamless, stable continuation
+# - Slower learning but no risk of instability
+# - If progress is too slow, consider restarting with learning_rate=5e-5
