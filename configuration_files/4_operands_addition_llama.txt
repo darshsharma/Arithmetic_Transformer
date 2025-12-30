@@ -1,0 +1,98 @@
+# LLaMA 3.1 8B Configuration for 4-Operand Addition Task
+# This config fine-tunes a pre-trained LLaMA 3.1 8B model on arithmetic tasks
+
+# ===== Model Selection ===== #
+use_llama = True
+llama_model_name = "meta-llama/Meta-Llama-3.1-8B"
+
+# ===== Evaluation Settings ===== #
+eval_interval = 2000
+eval_iters = 1
+always_save_checkpoint = True
+
+# ===== WandB Logging ===== #
+wandb_log = True
+wandb_project = 'addition_llama'
+wandb_run_name = '4_operands_llama_3.1_8b_plain'
+
+# ===== Model Architecture (LLaMA-specific) ===== #
+# Note: LLaMA 8B has fixed architecture, these are for compatibility
+block_size = 128  # Larger for BPE efficiency (was 32 for char-level)
+dropout = 0.1  # Light dropout for fine-tuning
+
+# ===== Training Configuration ===== #
+batch_size = 64  # Smaller due to 8B parameters (was 512 for custom GPT)
+gradient_accumulation_steps = 1
+
+# ===== Data Format ===== #
+data_format = 'plain'
+operator = '+'
+dataset = 'bal'
+
+# ===== Initialization ===== #
+# Always use 'scratch' for LLaMA - it loads pre-trained weights then fine-tunes
+init_from = 'scratch'
+iter_num = 0
+# To resume fine-tuning, change to: init_from = 'resume'
+ckpt_path_name = 'ckpt.pt'
+
+# ===== Task Settings ===== #
+num_digit = 3
+max_new_tokens = 8  # BPE needs fewer tokens than character-level (was 5)
+drop_leading_digit = False
+zero_pad = False
+
+# ===== Learning Rate (Lower for Fine-tuning) ===== #
+learning_rate = 1e-4  # Lower than custom GPT (was 1e-3)
+max_iters = 50000  # May need fewer iterations due to pre-training
+lr_decay_iters = 50000
+beta1 = 0.9
+beta2 = 0.999  # Higher beta2 for fine-tuning
+warmup_iters = 500  # Longer warmup for stability
+weight_decay = 1e-1
+grad_clip = 1.0
+
+# ===== Device ===== #
+device = 'cuda:0'
+dtype = 'bfloat16'  # LLaMA uses bfloat16
+compile = True  # Use PyTorch 2.0 compile
+
+# ===== Paths ===== #
+out_dir = 'results/4_operands_0_to_999_uniform/llama_out'
+data_dir = 'data/4_operands_0_to_999_uniform/'
+
+# ===== Data Files ===== #
+train_data_name = 'train.txt'
+val_data_name = 'val.txt'
+test_file_name = 'test.txt'
+main_test_name = "test"
+
+# ===== Evaluation Settings ===== #
+eval_addition = True
+eval_addition_train = True
+train_data_test_name = "train_eval.txt"
+
+# Mode for evaluation: "compute_gold" or "read_gold_as_str"
+# Use "read_gold_as_str" if test files include groundtruth
+mode = "read_gold_as_str"
+
+# ===== Statistical Measurements ===== #
+# Disable MI measurement for LLaMA (not yet adapted for BPE tokenization)
+mi_measurement = False
+
+# ===== Additional Settings ===== #
+eval_only = False  # Set to True to only run evaluation
+save_final = True
+use_flash = True  # Flash Attention (enabled in LLaMA adapter)
+
+# ===== Notes ===== #
+# 1. Make sure you have HuggingFace access to LLaMA 3.1
+#    Run: huggingface-cli login
+#
+# 2. Memory requirements: ~16-24GB GPU memory for 8B model
+#    If OOM, reduce batch_size to 32 or 16
+#
+# 3. Expected convergence: 20k-50k iterations (vs 200k for custom GPT)
+#
+# 4. Training speed: ~10-50 it/s depending on GPU
+#    (vs ~1000 it/s for custom GPT)

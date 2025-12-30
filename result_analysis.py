@@ -94,14 +94,14 @@ def digit_error_tally(actuals, preds) -> Dict[str, int]:
 
 
 def analyze_csv(
-    csv_path: str | Path,
+    csv_path,
     step_size: int = 5,
     offset: int = 0,
     max_steps: int = 800000,
     actual_col: str = "actual",
     pred_regex: str = PRED_REGEX_DEFAULT,
     save_fig: bool = True,
-    fig_path: str | None = None,
+    fig_path = None,
     save_counts_csv: bool = False,
 ) -> Tuple[pd.DataFrame, Dict[int, Dict[str, int]]]:
     """
@@ -201,6 +201,133 @@ def analyze_csv(
         counts_df.to_csv(counts_csv_path, index=False)
 
     return df, place_counts_over_iters
+
+
+def analyze_csv_error_rates(
+    csv_path,
+    step_size: int = 5,
+    offset: int = 0,
+    max_steps: int = 800000,
+    actual_col: str = "actual",
+    pred_regex: str = PRED_REGEX_DEFAULT,
+    save_fig: bool = True,
+    fig_path = None,
+    save_rates_csv: bool = False,
+) -> Tuple[pd.DataFrame, Dict[int, Dict[str, float]]]:
+    """
+    Read csv_path, compute digit-wise ERROR RATES (0-1) for matching pred_iter_* columns,
+    plot the results and optionally save the figure.
+
+    Unlike analyze_csv(), this returns error RATES (errors / total_examples) instead of counts.
+
+    Returns:
+      - df (pandas.DataFrame)
+      - stats_by_iteration: dict mapping iteration -> {place: error_rate, ...}
+    """
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(csv_path)
+
+    df = pd.read_csv(csv_path)
+    total_examples = len(df)
+
+    if total_examples == 0:
+        raise ValueError("CSV file is empty")
+
+    # find relevant pred columns
+    pred_cols: List[tuple[int, str]] = []
+    prog = re.compile(pred_regex)
+    for col in df.columns:
+        m = prog.fullmatch(col)
+        if not m:
+            continue
+        step = int(m.group(1))
+        if step >= offset and (step - offset) % step_size == 0 and step <= max_steps:
+            pred_cols.append((step, col))
+    pred_cols.sort(key=lambda x: x[0])
+
+    if not pred_cols:
+        raise ValueError("No prediction columns found with the provided regex/filters.")
+
+    iterations = []
+    place_rates_over_iters = {}  # iteration -> error rates dict
+
+    # collect error counts and convert to rates
+    for step, col in pred_cols:
+        if actual_col not in df.columns:
+            raise ValueError(f"Actual column '{actual_col}' not found in CSV.")
+
+        # Get error counts
+        error_counts = digit_error_tally(df[actual_col], df[col])
+
+        # Convert counts to rates (divide by total examples)
+        error_rates = {place: count / total_examples for place, count in error_counts.items()}
+
+        iterations.append(step)
+        place_rates_over_iters[step] = error_rates
+
+    # Build the union of all place names across iterations
+    all_places = set()
+    for stats in place_rates_over_iters.values():
+        all_places.update(stats.keys())
+
+    # Order places numerically based on their ordinal name
+    ordered_places = sorted(all_places, key=_place_order_key)
+
+    if not ordered_places:
+        example_stats = next(iter(place_rates_over_iters.values()))
+        ordered_places = list(example_stats.keys())
+
+    # Create series for plotting; fill missing entries with 0
+    series = {p: [place_rates_over_iters[it].get(p, 0) for it in iterations] for p in ordered_places}
+
+    # Create readable labels mapping ordinal to position names
+    label_map = {
+        "0th": "units",
+        "1st": "tens",
+        "2nd": "hundreds",
+        "3rd": "thousands",
+        "4th": "ten-thousands",
+        "5th": "hundred-thousands",
+        "6th": "millions",
+        "7th": "ten-millions",
+        "8th": "hundred-millions"
+    }
+
+    # Plotting
+    plt.figure(figsize=(12, 8))
+    for p in ordered_places:
+        display_label = f"{label_map.get(p, p)}-place error rate"
+        plt.plot(iterations, series[p], label=display_label, marker='o', markersize=3)
+
+    plt.title("Digit-wise Error Rate vs. Training Iteration")
+    plt.xlabel("Training Iteration")
+    plt.ylabel("Error Rate (0 = perfect, 1 = all wrong)")
+    plt.ylim(-0.05, 1.05)  # Slightly beyond [0,1] for visibility
+    plt.grid(True, linestyle="--", linewidth=0.5)
+    plt.legend()
+    plt.tight_layout()
+
+    if save_fig:
+        if fig_path is None:
+            fig_path = csv_path.with_suffix(".digit_error_rates.png")
+        plt.savefig(fig_path, dpi=150)
+        plt.close()
+    else:
+        plt.show()
+
+    if save_rates_csv:
+        rates_rows = []
+        for it in iterations:
+            row = {"iter": it}
+            for p in ordered_places:
+                row[p] = place_rates_over_iters[it].get(p, 0)
+            rates_rows.append(row)
+        rates_df = pd.DataFrame(rates_rows)
+        rates_csv_path = csv_path.with_name(csv_path.stem + "_digit_error_rates.csv")
+        rates_df.to_csv(rates_csv_path, index=False)
+
+    return df, place_rates_over_iters
 
 
 # If called from the command line:
