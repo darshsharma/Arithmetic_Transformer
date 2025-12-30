@@ -46,10 +46,11 @@ zero_pad = False
 
 # ===== Learning Rate - CONTINUED FROM ITER 30K ===== #
 # At iter 30k with original schedule: LR had decayed to 1e-5 (min_lr)
-# Continuing with same LR - will decay from 1e-5 to 1e-6 over next 20k iterations
+# Continuing with same LR - will decay from 1e-5 to 1e-6 over next 50k iterations
 learning_rate = 1e-5  # Continue from where iter 30k left off
-max_iters = 80000  # Total iterations: will train from 30k to 50k (20k more iterations)
+max_iters = 80000  # Total iterations: will train from 30k to 80k (50k more iterations)
 lr_decay_iters = 80000  # Match max_iters for continued cosine decay
+min_lr = 5e-6  # Will decay to this value by iteration 80k
 beta1 = 0.9
 beta2 = 0.999
 warmup_iters = 0  # No warmup - seamless continuation
@@ -103,7 +104,7 @@ use_flash = True
 #
 # RESUMING CONFIGURATION:
 # - Make sure ckpt_final.pt exists in out_dir before running
-# - Will automatically start from iteration 30000 and train to 50000
+# - Will automatically start from iteration 30000 and train to 80000
 # - LR continues from 1e-5 (where iter 30k ended) → decays to 1e-6
 # - No warmup - seamless continuation from previous training
 # - Weight decay KEPT at 1e-1 for regularization (prevents overfitting)

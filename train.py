@@ -598,11 +598,11 @@ if use_llama:
     if init_from == 'resume':
         if resume_dir:
             print(f"Resuming fine-tuning from {resume_dir}")
-            checkpoint = torch.load(resume_dir, map_location=device)
+            checkpoint = torch.load(resume_dir, map_location=device, weights_only=False)
         else:
             print(f"Resuming fine-tuning from {out_dir}")
             ckpt_path = os.path.join(out_dir, ckpt_path_name)
-            checkpoint = torch.load(ckpt_path, map_location=device)
+            checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
 
         # Load fine-tuned weights
         state_dict = checkpoint['model']
@@ -639,12 +639,12 @@ else:
     elif init_from == 'resume':
         if resume_dir:
             print(f"Resuming training from {resume_dir}")
-            checkpoint = torch.load(resume_dir, map_location=device)
+            checkpoint = torch.load(resume_dir, map_location=device, weights_only=False)
         else:
             print(f"Resuming training from {out_dir}")
             # resume training from a checkpoint.
             ckpt_path = os.path.join(out_dir, ckpt_path_name)
-            checkpoint = torch.load(ckpt_path, map_location=device)
+            checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
         checkpoint_model_args = checkpoint['model_args']
         # force these config attributes to be equal otherwise we can't even resume training
         # the rest of the attributes (e.g. dropout) can stay as desired from command line
