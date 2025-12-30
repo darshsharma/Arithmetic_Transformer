@@ -11,8 +11,8 @@ eval_iters = 1
 always_save_checkpoint = True
 
 more_early_eval1 = True  # Enable frequent early evaluation
-early_eval_interval1 = 100  # Evaluate every 25 iterations early on
-early_eval_border1 = 1000  # Until iteration 1000
+early_eval_interval1 = 25  # Evaluate every 25 iterations early on
+early_eval_border1 = 100  # Until iteration 1000
 
 # ===== WandB Logging ===== #
 wandb_log = True
@@ -29,7 +29,7 @@ batch_size = 128  # Can use larger batch than LLaMA (was 64 for LLaMA-8B)
 gradient_accumulation_steps = 1
 
 # ===== Data Format ===== #
-data_format = 'reverse'
+data_format = 'plain'
 operator = '+'
 dataset = 'bal'
 
@@ -62,21 +62,21 @@ dtype = 'bfloat16'  # Use bfloat16 for efficiency
 compile = True  # Use PyTorch 2.0 compile
 
 # ===== Paths ===== #
-out_dir = '/content/drive/MyDrive/addition_1/4_operands_0_to_999_uniform/pythia_out'
+out_dir = '/content/drive/MyDrive/addition_1/4_operands_0_to_999_uniform/pythia_out_plain'
 data_dir = '/content/drive/MyDrive/addition/data/4_operands_0_to_999_uniform/'
 
 # to edit: training data
-train_data_name = 'train_reverse.txt'
+train_data_name = 'train.txt'
 
 # to edit: whether do evaluation on training data to see if the model is simply memorizing
 eval_addition_train = True
-train_data_test_name = "train_eval_reverse.txt"
+train_data_test_name = "train_eval.txt"
 
 # to edit: validation data
-val_data_name = 'val_reverse.txt'
+val_data_name = 'val.txt'
 eval_addition = True
-test_file_name = 'test_reverse.txt'
-main_test_name = "test_reverse"
+test_file_name = 'test.txt'
+main_test_name = "test"
 
 
 # Mode for evaluation: "compute_gold" or "read_gold_as_str"
