@@ -112,6 +112,10 @@ meta_path_specified = True # use saved meta_file (False if data_type='text')
 eps = 0
 tokenizer = 'char' # by default, use char level tokenizer. but for pretrained models, use openai tokenizer eg: 'gpt2'
 
+# Pre-trained model settings (LLaMA, Pythia, etc.)
+use_llama = False  # Set to True to use a pre-trained HuggingFace model instead of custom GPT
+llama_model_name = "EleutherAI/pythia-1b"  # HuggingFace model identifier (e.g., "EleutherAI/pythia-1b", "meta-llama/Meta-Llama-3.1-8B")
+
 simple=False
 random_A=False
 random_C=False
@@ -300,15 +304,53 @@ ctx = nullcontext() if device_type == 'cpu' else torch.amp.autocast(device_type=
 
 
 
-train_data_str = concat_strip_dollar(train_data_path)
-val_data_str = concat_strip_dollar(val_data_path)
-
-# Create metadata from the combined data
-meta, data_encoder, data_decoder = create_meta_for_addition(train_data_str)
-
 # Decide batch method from CLI
 batch_method = getattr(_known_args, 'batch', 'per_example')
 print(f"Using batch preparation method: {batch_method}")
+
+# Choose tokenization method based on use_llama flag
+if use_llama:
+    print("=" * 60)
+    print(f"Using pre-trained model: {llama_model_name}")
+    print("With BPE tokenization")
+    print("=" * 60)
+
+    # Import tokenizer wrapper
+    from llama_tokenizer import LlamaTokenizerWrapper
+
+    # Initialize tokenizer
+    tokenizer_wrapper = LlamaTokenizerWrapper(llama_model_name)
+    meta = tokenizer_wrapper.create_meta()
+    pad_id = tokenizer_wrapper.pad_id
+    eos_id = tokenizer_wrapper.eos_id
+
+    # Warn about block size for BPE
+    if block_size < 64:
+        print(f"WARNING: block_size={block_size} may be too small for BPE tokenization.")
+        print(f"         Recommend block_size >= 128 for pre-trained models")
+
+    # Create encode/decode functions for evaluation
+    def encode_addition(text, meta):
+        return torch.tensor(tokenizer_wrapper.encode(text), dtype=torch.long)
+
+    def decode_addition(tensor, meta):
+        return tokenizer_wrapper.decode(tensor)
+
+    print(f"Tokenizer initialized: vocab_size={len(tokenizer_wrapper.tokenizer)}")
+
+else:
+    print("=" * 60)
+    print("Using custom GPT with character-level tokenization")
+    print("=" * 60)
+
+    # Original character-level tokenization
+    train_data_str = concat_strip_dollar(train_data_path)
+    val_data_str = concat_strip_dollar(val_data_path)
+
+    # Create metadata from the combined data
+    meta, data_encoder, data_decoder = create_meta_for_addition(train_data_str)
+
+    # Character-level encode/decode functions (already defined in globals)
 
 def get_infinite_dataloader(dataloader):
     while True:
@@ -331,10 +373,10 @@ class AdditionDataset(Dataset):
         self.eos_id = self.meta['stoi'].get('$')
         if self.eos_id is None:
             raise ValueError("eos token '$' not found in meta['stoi']")
-        
+
     def __len__(self):
         return len(self.lines)
-    
+
     def __getitem__(self, idx):
         line_with_trailing_eos = self.lines[idx]
         # Convert the line to tensor using our encoder
@@ -343,16 +385,75 @@ class AdditionDataset(Dataset):
         y = pad_sequence(raw[1:],  block_size, pad_value=self.pad_id)  # -100 is ignore_index
         return x, y
 
+class LlamaAdditionDataset(Dataset):
+    """Dataset for LLaMA with BPE tokenization."""
+
+    def __init__(self, file_path, tokenizer_wrapper, block_size_param):
+        self.tokenizer = tokenizer_wrapper
+        self.block_size = block_size_param
+
+        # Read file
+        with open(file_path, 'r') as f:
+            raw_lines = [line.strip() for line in f.readlines() if line.strip()]
+
+        # Ensure lines end with EOS token
+        self.lines = []
+        for line in raw_lines:
+            if not line.endswith('$'):
+                line = line + '$'
+            self.lines.append(line)
+
+        self.pad_id = tokenizer_wrapper.pad_id
+        self.eos_id = tokenizer_wrapper.eos_id
+
+    def __len__(self):
+        return len(self.lines)
+
+    def __getitem__(self, idx):
+        line = self.lines[idx]
+
+        # Encode with BPE tokenizer
+        token_ids = self.tokenizer.encode(line)
+        raw = torch.tensor(token_ids, dtype=torch.long)
+
+        # Pad or truncate to block_size
+        if len(raw) < self.block_size:
+            # Pad
+            padding = torch.full((self.block_size - len(raw),), self.pad_id, dtype=torch.long)
+            raw_padded = torch.cat([raw, padding])
+        else:
+            # Truncate
+            raw_padded = raw[:self.block_size]
+
+        # Create input and target sequences (shift by 1 for next-token prediction)
+        x = raw_padded[:-1]
+        y = raw_padded[1:]
+
+        # Ensure both are same length
+        if len(x) < self.block_size - 1:
+            x = pad_sequence(x, self.block_size - 1, pad_value=self.pad_id)
+            y = pad_sequence(y, self.block_size - 1, pad_value=self.pad_id)
+
+        return x, y
+
 if batch_method == 'per_example':
-    # per-example: use AdditionDataset and DataLoader
-    train_dataset = AdditionDataset(train_data_path, meta)
+    # per-example: use appropriate Dataset based on use_llama
+    if use_llama:
+        # Use LLaMA dataset with BPE tokenizer
+        train_dataset = LlamaAdditionDataset(train_data_path, tokenizer_wrapper, block_size)
+        val_dataset = LlamaAdditionDataset(val_data_path, tokenizer_wrapper, block_size)
+    else:
+        # Use original character-level dataset
+        train_dataset = AdditionDataset(train_data_path, meta)
+        val_dataset = AdditionDataset(val_data_path, meta)
+
+    # Create DataLoaders
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
         shuffle=True,
         pin_memory=(device_type=='cuda')
     )
-    val_dataset = AdditionDataset(val_data_path, meta)
     val_loader = DataLoader(
         val_dataset,
         batch_size=batch_size,
@@ -365,6 +466,9 @@ if batch_method == 'per_example':
 
 else:
     # slicing: convert full text into 1D token tensor(s)
+    if use_llama:
+        raise ValueError("Slicing batch method is not recommended with LLaMA. Use --batch per_example instead.")
+
     # If train_data_str/val_data_str not created, load files (safe fallback)
     if 'train_data_str' not in globals():
         train_data_str = concat_strip_dollar(train_data_path)  # or open/read
@@ -399,10 +503,16 @@ else:
 
 
 
-# meta already created above
-pad_id = meta['stoi']['<pad>']
-eos_id = meta['stoi']['$']
-# expose these in config for other code to use
+# Handle pad_id and eos_id based on tokenizer type
+if use_llama:
+    # Already set above from tokenizer_wrapper
+    pass  # pad_id and eos_id already defined
+else:
+    # meta already created above for character-level
+    pad_id = meta['stoi']['<pad>']
+    eos_id = meta['stoi']['$']
+
+# Expose in config for other code to use
 config['pad_id'] = pad_id
 config['eos_id'] = eos_id
 
@@ -457,47 +567,106 @@ for tp in test_files:
 
 model_args = dict(n_layer=n_layer, n_head=n_head, n_embd=n_embd, block_size=block_size,
                   bias=bias, vocab_size=None, dropout=dropout, use_flash=use_flash) # start with model_args from command line
-if init_from == 'scratch':
-    # init a new model from scratch
-    print("Initializing a new model from scratch")
-    # determine the vocab size we'll use for from-scratch training
-    if meta_vocab_size is None:
-        print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
-    model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
-    gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf, pad_id)
+
+# Initialize model based on use_llama flag
+if use_llama:
+    print("=" * 60)
+    print(f"Loading pre-trained model: {llama_model_name}")
+    print("=" * 60)
+
+    # Import model adapter
+    from llama_adapter import LlamaModelAdapter
+
+    # Create model (pass tokenizer to resize embeddings if needed)
+    model = LlamaModelAdapter(
+        model_name_or_path=llama_model_name,
+        pad_id=pad_id,
+        block_size=block_size,
+        dropout=dropout,
+        tokenizer=tokenizer_wrapper
+    )
+
+    # Update model_args for checkpointing
+    model_args['use_llama'] = True
+    model_args['llama_model_name'] = llama_model_name
+    model_args['vocab_size'] = model.vocab_size
+
+    # Move to device
     model.to(device)
-elif init_from == 'resume':
-    if resume_dir:
-        print(f"Resuming training from {resume_dir}")
-        checkpoint = torch.load(resume_dir, map_location=device)
+
+    # Now check if we should resume from a fine-tuning checkpoint
+    if init_from == 'resume':
+        if resume_dir:
+            print(f"Resuming fine-tuning from {resume_dir}")
+            checkpoint = torch.load(resume_dir, map_location=device)
+        else:
+            print(f"Resuming fine-tuning from {out_dir}")
+            ckpt_path = os.path.join(out_dir, ckpt_path_name)
+            checkpoint = torch.load(ckpt_path, map_location=device)
+
+        # Load fine-tuned weights
+        state_dict = checkpoint['model']
+        unwanted_prefix = '_orig_mod.'
+        for k, v in list(state_dict.items()):
+            if k.startswith(unwanted_prefix):
+                state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+
+        model.load_state_dict(state_dict)
+        iter_num = checkpoint['iter_num'] if resume_iter else 0
+        max_iters += iter_num
+        best_val_loss = checkpoint['best_val_loss']
+        if 'best_perplexity' in checkpoint.keys():
+            best_perplexity = checkpoint['best_perplexity']
+        if 'best_accuracy' in checkpoint.keys():
+            best_accuracy = checkpoint['best_accuracy']
+
+        print(f"Resumed from iteration {iter_num}")
     else:
-        print(f"Resuming training from {out_dir}")
-        # resume training from a checkpoint.
-        ckpt_path = os.path.join(out_dir, ckpt_path_name)
-        checkpoint = torch.load(ckpt_path, map_location=device)
-    checkpoint_model_args = checkpoint['model_args']
-    # force these config attributes to be equal otherwise we can't even resume training
-    # the rest of the attributes (e.g. dropout) can stay as desired from command line
-    for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
-        model_args[k] = checkpoint_model_args[k]
-    # create the model
-    gptconf = GPTConfig(**model_args)
-    model = GPT(gptconf)
-    model.to(device)
-    state_dict = checkpoint['model']
-    # fix the keys of the state dictionary :(
-    # honestly no idea how checkpoints sometimes get this prefix, have to debug more
-    unwanted_prefix = '_orig_mod.'
-    for k,v in list(state_dict.items()):
-        if k.startswith(unwanted_prefix):
-            state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
-    model.load_state_dict(state_dict)
-    iter_num = checkpoint['iter_num'] if resume_iter else 0
-    max_iters += iter_num
-    best_val_loss = checkpoint['best_val_loss']
-    if 'best_perplexity' in checkpoint.keys():
-        best_perplexity = checkpoint['best_perplexity']
+        print(f"Starting fresh fine-tuning of {llama_model_name} (init_from='scratch')")
+
+else:
+    # Custom GPT model
+    if init_from == 'scratch':
+        # init a new model from scratch
+        print("Initializing a new custom GPT model from scratch")
+        # determine the vocab size we'll use for from-scratch training
+        if meta_vocab_size is None:
+            print("defaulting to vocab_size of GPT-2 to 50304 (50257 rounded up for efficiency)")
+        model_args['vocab_size'] = meta_vocab_size if meta_vocab_size is not None else 50304
+        gptconf = GPTConfig(**model_args)
+        model = GPT(gptconf, pad_id)
+        model.to(device)
+    elif init_from == 'resume':
+        if resume_dir:
+            print(f"Resuming training from {resume_dir}")
+            checkpoint = torch.load(resume_dir, map_location=device)
+        else:
+            print(f"Resuming training from {out_dir}")
+            # resume training from a checkpoint.
+            ckpt_path = os.path.join(out_dir, ckpt_path_name)
+            checkpoint = torch.load(ckpt_path, map_location=device)
+        checkpoint_model_args = checkpoint['model_args']
+        # force these config attributes to be equal otherwise we can't even resume training
+        # the rest of the attributes (e.g. dropout) can stay as desired from command line
+        for k in ['n_layer', 'n_head', 'n_embd', 'block_size', 'bias', 'vocab_size']:
+            model_args[k] = checkpoint_model_args[k]
+        # create the model
+        gptconf = GPTConfig(**model_args)
+        model = GPT(gptconf, pad_id)
+        model.to(device)
+        state_dict = checkpoint['model']
+        # fix the keys of the state dictionary :(
+        # honestly no idea how checkpoints sometimes get this prefix, have to debug more
+        unwanted_prefix = '_orig_mod.'
+        for k,v in list(state_dict.items()):
+            if k.startswith(unwanted_prefix):
+                state_dict[k[len(unwanted_prefix):]] = state_dict.pop(k)
+        model.load_state_dict(state_dict)
+        iter_num = checkpoint['iter_num'] if resume_iter else 0
+        max_iters += iter_num
+        best_val_loss = checkpoint['best_val_loss']
+        if 'best_perplexity' in checkpoint.keys():
+            best_perplexity = checkpoint['best_perplexity']
     if 'best_accuracy' in checkpoint.keys():
         best_accuracy = checkpoint['best_accuracy']
 

@@ -1,0 +1,34 @@
+# LLaMA Integration Requirements
+# Install with: pip install -r requirements_llama.txt
+
+# Core PyTorch (if not already installed)
+torch>=2.0.0
+numpy>=1.24.0
+
+# HuggingFace Transformers and dependencies
+transformers>=4.40.0
+accelerate>=0.28.0
+sentencepiece>=0.1.99
+protobuf>=3.20.0
+
+# Flash Attention for fast training (optional but recommended)
+# Requires CUDA 11.8+ and compatible PyTorch
+# Install separately if needed: pip install flash-attn --no-build-isolation
+flash-attn>=2.5.0
+
+# Training utilities
+pandas>=2.0.0
+pyyaml>=6.0
+tqdm>=4.65.0
+
+# Logging
+wandb>=0.15.0
+
+# Optional: For 8-bit quantization (reduces memory usage)
+# bitsandbytes>=0.41.0
+
+# Note: For Flash Attention installation issues, try:
+# pip install flash-attn --no-build-isolation
+#
+# For CUDA compatibility issues, make sure your PyTorch is installed with matching CUDA version:
+# pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
