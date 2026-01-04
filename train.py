@@ -323,6 +323,7 @@ if use_llama:
     meta = tokenizer_wrapper.create_meta()
     pad_id = tokenizer_wrapper.pad_id
     eos_id = tokenizer_wrapper.eos_id
+    dollar_token_id = tokenizer_wrapper.dollar_token_id
 
     # Warn about block size for BPE
     if block_size < 64:
@@ -515,6 +516,8 @@ else:
 # Expose in config for other code to use
 config['pad_id'] = pad_id
 config['eos_id'] = eos_id
+config['dollar_token_id'] = dollar_token_id
+config['stop_set'] = set([eos_id, dollar_token_id])
 
 meta_vocab_size = meta['vocab_size']
 print(f"Using vocabulary size: {meta_vocab_size}")
@@ -991,7 +994,7 @@ while iter_num < max_iters:
                     'config': config,
                     'meta': meta,
                 }
-                torch.save(checkpoint, os.path.join(out_dir, f'ckpt_iter_{iter_num}_acc.pt'))
+                #torch.save(checkpoint, os.path.join(out_dir, f'ckpt_iter_{iter_num}_acc.pt'))
         
         # Training data evaluation
         train_accuracy = None

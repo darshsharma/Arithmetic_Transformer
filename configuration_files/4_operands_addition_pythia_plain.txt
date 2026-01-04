@@ -25,7 +25,7 @@ dropout = 0.1  # Light dropout for fine-tuning
 
 # ===== Training Configuration ===== #
 # Pythia-1B is smaller than LLaMA-8B, so we can use larger batch size
-batch_size = 128  # Can use larger batch than LLaMA (was 64 for LLaMA-8B)
+batch_size = 512  # Can use larger batch than LLaMA (was 64 for LLaMA-8B)
 gradient_accumulation_steps = 1
 
 # ===== Data Format ===== #
@@ -48,12 +48,11 @@ zero_pad = False
 
 # ===== Learning Rate (Lower for Fine-tuning) ===== #
 learning_rate = 1e-4  # Lower than custom GPT
-max_iters = 30000  # Pythia-1B may converge faster than LLaMA-8B
-lr_decay_iters = 30000
+max_iters =  200000 # Pythia-1B may converge faster than LLaMA-8B
+lr_decay_iters = 200000
 beta1 = 0.9
-beta2 = 0.999  # Higher beta2 for fine-tuning
+beta2 = 0.98 # Higher beta2 for fine-tuning
 warmup_iters = 500
-weight_decay = 1e-1
 grad_clip = 1.0
 
 # ===== Device ===== #

@@ -172,7 +172,8 @@ def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
                     x,
                     max_new_tokens,
                     temperature=temperature,
-                    top_k=top_k
+                    top_k=top_k,
+                    eos_token_id=config.get("stop_set", [eos_id])
                 )
                 outcome_list = [decode(y_i.tolist()) for y_i in y]
 

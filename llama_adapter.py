@@ -61,14 +61,14 @@ class LlamaModelAdapter(nn.Module):
         self.config.block_size = block_size
 
         # Resize model embeddings if tokenizer added new tokens
-        if tokenizer is not None:
-            original_vocab_size = self.model.config.vocab_size
-            new_vocab_size = len(tokenizer.tokenizer)
+        # if tokenizer is not None:
+        #     original_vocab_size = self.model.config.vocab_size
+        #     new_vocab_size = len(tokenizer.tokenizer)
 
-            if new_vocab_size != original_vocab_size:
-                print(f"Resizing embeddings: {original_vocab_size} → {new_vocab_size}")
-                self.model.resize_token_embeddings(new_vocab_size)
-                print(f"✓ Model embeddings resized to match tokenizer")
+        #     if new_vocab_size != original_vocab_size:
+        #         print(f"Resizing embeddings: {original_vocab_size} → {new_vocab_size}")
+        #         self.model.resize_token_embeddings(new_vocab_size)
+        #         print(f"✓ Model embeddings resized to match tokenizer")
 
         # Store vocab size for compatibility
         self.vocab_size = self.model.config.vocab_size
@@ -105,29 +105,37 @@ class LlamaModelAdapter(nn.Module):
 
         if targets is not None:
             # Training mode: compute loss
+            # Training mode: compute loss
+            # We must compute loss manually because passing 'labels' to HuggingFace
+            # triggers an internal shift (v[t] predicts v[t+1]).
+            # Since our 'targets' are ALREADY shifted (targets[t] is the label for idx[t]),
+            # we don't want that internal shift.
+            
             outputs = self.model(
                 input_ids=idx,
                 attention_mask=attention_mask,
-                labels=targets,
                 use_cache=False  # Disable cache during training
             )
 
             # HuggingFace returns CausalLMOutput object
             logits = outputs.logits
 
-            # Recompute loss with correct ignore_index if pad_id != -100
-            # HuggingFace uses -100 as default ignore_index, but we need to use pad_id
-            if self.pad_id != -100:
-                logits_flat = logits.reshape(-1, logits.size(-1))
-                targets_flat = targets.reshape(-1)
-                loss = nn.functional.cross_entropy(
-                    logits_flat,
-                    targets_flat,
-                    ignore_index=self.pad_id
-                )
-            else:
-                # Use the loss computed by HuggingFace
-                loss = outputs.loss
+            # Flatten for cross_entropy
+            logits_flat = logits.view(-1, logits.size(-1))
+            targets_flat = targets.view(-1)
+
+            # verify shapes match
+            if logits_flat.shape[0] != targets_flat.shape[0]:
+                 # This can happen if padding/truncation was inconsistent
+                 # but based on train.py, they should match.
+                 # Just in case, we'll let it error out naturally if mismatch 
+                 pass
+
+            loss = nn.functional.cross_entropy(
+                logits_flat,
+                targets_flat,
+                ignore_index=self.pad_id
+            )
 
             return logits, loss
         else:
@@ -143,46 +151,64 @@ class LlamaModelAdapter(nn.Module):
             return logits, None
 
     @torch.no_grad()
-    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None):
-        """
-        Generate text matching GPT interface.
-
-        Args:
-            idx: Starting token IDs of shape (batch_size, seq_len)
-            max_new_tokens: Number of tokens to generate
-            temperature: Sampling temperature (higher = more random)
-            top_k: Top-k sampling parameter (None or 1 = greedy decoding)
-
-        Returns:
-            Generated token IDs of shape (batch_size, seq_len + max_new_tokens)
-        """
-        for _ in range(max_new_tokens):
-            # Crop context if it exceeds block_size
-            idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
-
-            # Forward pass to get logits
-            logits, _ = self(idx_cond)
-            logits = logits[:, -1, :] / temperature
-
-            # Top-k sampling
-            if top_k is not None:
-                v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-                logits[logits < v[:, [-1]]] = -float('Inf')
-
-            # Sample from the distribution
-            probs = torch.nn.functional.softmax(logits, dim=-1)
-
-            if top_k == 1:
-                # Greedy decoding (deterministic)
-                idx_next = torch.argmax(probs, dim=-1, keepdim=True)
+    def generate(self, idx, max_new_tokens, temperature=1.0, top_k=None, eos_token_id=None):
+            """
+            Args:
+                eos_token_id: The integer ID of the token that should stop generation (e.g., tokenizer.eos_token_id)
+                            or a list of IDs (e.g. [eos_id, dollar_sign_id])
+            """
+            # Ensure eos_token_id is a list or set for easy checking
+            if isinstance(eos_token_id, int):
+                stop_tokens = {eos_token_id}
+            elif isinstance(eos_token_id, (list, tuple)):
+                stop_tokens = set(eos_token_id)
             else:
-                # Stochastic sampling
-                idx_next = torch.multinomial(probs, num_samples=1)
+                stop_tokens = set()
+            
+            batch_size = idx.shape[0]
+            finished = torch.zeros(batch_size, dtype=torch.bool, device=idx.device)
 
-            # Append to sequence
-            idx = torch.cat((idx, idx_next), dim=1)
+            for _ in range(max_new_tokens):
+                # Crop context if it exceeds block_size
+                idx_cond = idx if idx.size(1) <= self.config.block_size else idx[:, -self.config.block_size:]
 
-        return idx
+                # Forward pass
+                logits, _ = self(idx_cond)
+                logits = logits[:, -1, :] / temperature
+
+                # Top-k sampling
+                if top_k is not None:
+                    v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+                    logits[logits < v[:, [-1]]] = -float('Inf')
+
+                probs = torch.nn.functional.softmax(logits, dim=-1)
+
+                if top_k == 1:
+                    idx_next = torch.argmax(probs, dim=-1, keepdim=True)
+                else:
+                    idx_next = torch.multinomial(probs, num_samples=1)
+
+                # --- STOPPING LOGIC ---
+                # Check if the generated token is one of our stop tokens
+                # .item() pulls the scalar value out of the tensor (only works for batch_size=1)
+                # --- BATCH STOPPING LOGIC ---
+                if len(stop_tokens) > 0:
+                # Check which rows generated a stop token in this step
+                # We iterate because torch.isin can be tricky with device matching on older pytorch versions
+                    for stop_id in stop_tokens:
+                    # Update the finished mask where the new token matches a stop ID
+                        finished |= (idx_next.squeeze(-1) == stop_id)
+                
+                    # If ALL sequences in the batch are finished, we can stop early
+                    if finished.all():
+                        idx = torch.cat((idx, idx_next), dim=1)
+                        break
+            # -----------------------------
+
+                # Append to sequence
+                idx = torch.cat((idx, idx_next), dim=1)
+
+            return idx
 
     def configure_optimizers(self, weight_decay, learning_rate, betas, device_type):
         """

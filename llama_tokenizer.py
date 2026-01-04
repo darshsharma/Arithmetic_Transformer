@@ -28,23 +28,23 @@ class LlamaTokenizerWrapper:
         print(f"Loading LLaMA tokenizer from: {model_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        # FORCE '$' as EOS token to match data format
-        # This overrides the default EOS token (like </s> for LLaMA)
-        special_tokens = {'eos_token': '$'}
+        # # FORCE '$' as EOS token to match data format
+        # # This overrides the default EOS token (like </s> for LLaMA)
+        # special_tokens = {'eos_token': '$'}
 
-        # Add pad token if needed
-        if self.tokenizer.pad_token is None:
-            special_tokens['pad_token'] = '<pad>'
+        # # Add pad token if needed
+        # if self.tokenizer.pad_token is None:
+        #     special_tokens['pad_token'] = '<pad>'
 
-        num_added = self.tokenizer.add_special_tokens(special_tokens)
-        print(f"Set EOS token to '$' and added {num_added} special tokens: {special_tokens}")
+        # num_added = self.tokenizer.add_special_tokens(special_tokens)
+        # print(f"Set EOS token to '$' and added {num_added} special tokens: {special_tokens}")
 
-        # Verify '$' is set as EOS
-        assert self.tokenizer.eos_token == '$', f"Failed to set EOS token to '$', got {self.tokenizer.eos_token}"
-        print(f"✓ Verified: EOS token is '{self.tokenizer.eos_token}' (ID: {self.tokenizer.eos_token_id})")
+        # # Verify '$' is set as EOS
+        # assert self.tokenizer.eos_token == '$', f"Failed to set EOS token to '$', got {self.tokenizer.eos_token}"
+        # print(f"✓ Verified: EOS token is '{self.tokenizer.eos_token}' (ID: {self.tokenizer.eos_token_id})")
 
-        # Set padding side to right (for causal LM)
-        self.tokenizer.padding_side = 'right'
+        # # Set padding side to right (for causal LM)
+        # self.tokenizer.padding_side = 'right'
 
         # Create metadata dict compatible with existing code
         self.meta = {
@@ -53,6 +53,7 @@ class LlamaTokenizerWrapper:
             'itos': {},  # Not used with BPE, but kept for compatibility
             'tokenizer': self.tokenizer
         }
+        self.dollar_token_id = self.tokenizer.encode("$", add_special_tokens=False)[0]
 
         # Expose important IDs for easy access
         self.pad_id = self.tokenizer.pad_token_id
