@@ -55,6 +55,12 @@ class LlamaTokenizerWrapper:
         }
         self.dollar_token_id = self.tokenizer.encode("$", add_special_tokens=False)[0]
 
+        # Ensure pad_token is defined
+        if self.tokenizer.pad_token_id is None:
+            print(f"Tokenizer does not have a pad token. Defaulting to EOS token: {self.tokenizer.eos_token}")
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+            self.tokenizer.pad_token_id = self.tokenizer.eos_token_id
+
         # Expose important IDs for easy access
         self.pad_id = self.tokenizer.pad_token_id
         self.eos_id = self.tokenizer.eos_token_id
