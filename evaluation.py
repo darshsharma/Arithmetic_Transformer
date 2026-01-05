@@ -9,7 +9,7 @@ import pandas as pd
 import csv
 
 
-def get_abc_new(abc: str, zero_pad=False, data_format="plain", binary=False, mode: str = "compute_gold"):
+def get_abc_new(abc: str, zero_pad=False, data_format="plain", binary=False, mode: str = "compute_gold", reasoning_chain: bool = False):
     """Unified parser: mode='compute_gold' computes the groudtruth on the fly;
        mode='read_gold_as_str' reads the groundtruth from the evaluation files (testing, validation) to do string matching.
     Returns either
@@ -19,10 +19,14 @@ def get_abc_new(abc: str, zero_pad=False, data_format="plain", binary=False, mod
     """
 
     # Split the input string into parts
-    parts = abc.split('=')
-    if len(parts) != 2:
-        print(f'Invalid format, expected "a+b+c...=result", got: {abc}')
-        return None, None, None
+    if reasoning_chain:
+        # Split from the RIGHT (maxsplit=1) to isolate the final answer
+        # Example: "6+6=10+2=12$" -> parts=['6+6=10+2', '12$']
+        parts = abc.rsplit('=', 1)
+    else:
+        # Split from the LEFT (maxsplit=1) to isolate the original question
+        # Example: "6+6=10+2=12$" -> parts=['6+6', '10+2=12$']
+        parts = abc.split('=', 1)
 
     # Get the operands part (before =)
     operands_str = parts[0]
@@ -85,7 +89,7 @@ def get_abc_new(abc: str, zero_pad=False, data_format="plain", binary=False, mod
 
 _precomputed_batches = {}
 def prepare_addition_batches(config, encode, num_digit=3, zero_pad=False, binary=False,  data_type='binary', 
-                             operator='+', data_format='plain', add_space=False, simple=False, mode: str = "compute_gold", batch_method: str = "per_example"):
+                             operator='+', data_format='plain', add_space=False, simple=False, mode: str = "compute_gold", batch_method: str = "per_example", reasoning_chain: bool = False):
     device = config['device']
     test_batch_size = config['test_batch_size'] if 'test_batch_size' in config.keys() else 128
     start = config['start'] if 'start' in config.keys() else "FILE:prompt/prompt_addition_pad_test_0.01.txt"
@@ -105,8 +109,12 @@ def prepare_addition_batches(config, encode, num_digit=3, zero_pad=False, binary
     for line in lines:
         # split off gold answer
         # e.g. line = "123+456=579"
+        # e.g line = "123+456=100(1+4)+10(2+5)+1(3+6)=579"
         if batch_method == 'per_example':
-            prompt_str = line.split('=')[0] + '='  # keep the '=' at the end
+            if reasoning_chain:
+                prompt_str = line.rsplit('=', 1)[0] + '='  # keep the '=' at the end
+            else:
+                prompt_str = line.split('=')[0] + '='  # keep the '=' at the end
         else:
             prompt_str = '\n' + line.split('=')[0] + '='      # "123+456="
         prompt_ids = encode(prompt_str)
@@ -119,7 +127,8 @@ def prepare_addition_batches(config, encode, num_digit=3, zero_pad=False, binary
             zero_pad=zero_pad,
             data_format=data_format,
             binary=binary,
-            mode=mode
+            mode=mode,
+            reasoning_chain=reasoning_chain
         )
 
         entry = (x, operands, result)
@@ -136,7 +145,7 @@ def prepare_addition_batches(config, encode, num_digit=3, zero_pad=False, binary
     
     # Cache the batches using a hash of the configuration
     config_hash = hash(frozenset({k: str(v) for k, v in config.items() if k != 'device'}.items()))
-    batch_key = f"{config_hash}_{data_type}_{operator}_{num_digit}_{zero_pad}_{data_format}_{add_space}"
+    batch_key = f"{config_hash}_{data_type}_{operator}_{num_digit}_{zero_pad}_{data_format}_{add_space}_{reasoning_chain}"
     _precomputed_batches[batch_key] = (batch_list, total)
     
     return batch_list, total
@@ -144,7 +153,7 @@ def prepare_addition_batches(config, encode, num_digit=3, zero_pad=False, binary
 # Modified evaluation function that uses pre-created batches
 def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
                                   verbose=False, num_digit=3, zero_pad=False, data_format='plain',
-                                  add_space=False, operator='+', verbose_correct=False, analyze=False, mode: str = "compute_gold"):
+                                  add_space=False, operator='+', verbose_correct=False, analyze=False, mode: str = "compute_gold", reasoning_chain: bool = False):
     model.eval()
     device = config['device']
     max_new_tokens = config['max_new_tokens'] if 'max_new_tokens' in config.keys() else num_digit+2
@@ -204,7 +213,10 @@ def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
                             result = str(result)
 
                     if mode == "read_gold_as_str":
-                        c_hat = outcome.split('=')[1].split('$')[0].strip()
+                        if reasoning_chain:
+                            c_hat = outcome.rsplit('=',1)[1].split('$')[0].strip()
+                        else:
+                            c_hat = outcome.split('=',1)[1].split('$')[0].strip()
 
                         if data_format == "reverse":
                             sign = ''
@@ -237,9 +249,9 @@ def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
 # Keep the original function for backward compatibility, but make it use the new functions
 def evaluate_addition_batch(config, model, ctx, encode, decode, verbose=False, num_digit=3, zero_pad=False, 
                           data_type='binary', operator='+', data_format='plain', add_space=False, verbose_correct=False,
-                          analyze=False, mode: str = "compute_gold", batch_method: str = "per_example"):
+                          analyze=False, reasoning_chain=False, mode: str = "compute_gold", batch_method: str = "per_example"):
     config_hash = hash(frozenset({k: str(v) for k, v in config.items() if k != 'device'}.items()))
-    batch_key = f"{config_hash}_{data_type}_{operator}_{num_digit}_{zero_pad}_{data_format}_{add_space}"
+    batch_key = f"{config_hash}_{data_type}_{operator}_{num_digit}_{zero_pad}_{data_format}_{add_space}_{reasoning_chain}"
     
     if batch_key in _precomputed_batches:
         print("Using precomputed batches")
@@ -248,14 +260,14 @@ def evaluate_addition_batch(config, model, ctx, encode, decode, verbose=False, n
         print("Creating new batches")
         batch_list, total = prepare_addition_batches(
             config, encode, num_digit=num_digit, zero_pad=zero_pad,
-            data_type=data_type, operator=operator, data_format=data_format, add_space=add_space, mode=mode, batch_method=batch_method
+            data_type=data_type, operator=operator, data_format=data_format, add_space=add_space, mode=mode, batch_method=batch_method, reasoning_chain=reasoning_chain
         )
 
     # Evaluate using the batches
     return evaluate_addition_precomputed(
         config, model, ctx, decode, batch_list, total, verbose=verbose,
         num_digit=num_digit, zero_pad=zero_pad, data_format=data_format,
-        add_space=add_space, operator=operator, verbose_correct=verbose_correct, analyze=analyze, mode=mode
+        add_space=add_space, operator=operator, verbose_correct=verbose_correct, analyze=analyze, mode=mode, reasoning_chain=reasoning_chain
     )
 
 def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter_num, result_dir,
@@ -292,6 +304,61 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
             data_type=data_type, operator=operator,
             data_format=data_format, analyze=analyze, mode=mode, batch_method=batch_method
         )
+        if config.get('reasoning_chain', False):
+            test_names.append(f"{test_name}_reasoning_chain")
+            accuracy_reasoning, correct_reasoning, incorrect_reasoning = evaluate_addition_batch(
+                config, model, ctx, encode=encode, decode=decode,
+                verbose=verbose, num_digit=num_digit, zero_pad=zero_pad,
+                data_type=data_type, operator=operator,
+                data_format=data_format, analyze=analyze, mode=mode, batch_method=batch_method
+            )
+            accuracy_multiple_files[f"{test_name}_reasoning_chain"] = accuracy_reasoning
+            correct_multiple_files[f"{test_name}_reasoning_chain"] = correct_reasoning
+            incorrect_multiple_files[f"{test_name}_reasoning_chain"] = incorrect_reasoning
+            results_file_reasoning = os.path.join(result_dir, f'{test_name}_reasoning_chain_results.csv')
+            # Combine correct and incorrect examples and sort by operands to maintain consistent order
+            all_examples_reasoning = correct_reasoning + incorrect_reasoning
+            all_examples_reasoning.sort(key=lambda x: x[0])  # Sort by operands
+            # Create new DataFrame with operands and actual results
+            new_df_reasoning = pd.DataFrame({
+                'operands': [ex[0] for ex in all_examples_reasoning],
+                'actual': [ex[1] for ex in all_examples_reasoning],
+                f'pred_iter_{iter_num}': [ex[3] for ex in all_examples_reasoning]
+            })
+            # Save results
+            if os.path.exists(results_file_reasoning):
+                old_df_reasoning = pd.read_csv(results_file_reasoning, dtype={'operands': str, 'actual': str}, low_memory=False)
+                # normalize strings
+                for df in (old_df_reasoning, new_df_reasoning):
+                    df['operands'] = df['operands'].astype(str).str.strip()
+                    df['actual']   = df['actual'].fillna('').astype(str).str.strip()
+                # drop exact duplicate rows on key columns to avoid many-to-many merges
+                old_df_reasoning = old_df_reasoning.drop_duplicates(subset=['operands', 'actual'])
+                new_df_reasoning = new_df_reasoning.drop_duplicates(subset=['operands', 'actual'])
+                # set multi-index and join (this avoids Cartesian duplication)
+                old_idx_reasoning = old_df_reasoning.set_index(['operands', 'actual'])
+                new_idx_reasoning = new_df_reasoning.set_index(['operands', 'actual'])
+                # do the join; new columns will be added, existing columns preserved
+                merged_idx_reasoning = old_idx_reasoning.join(new_idx_reasoning, how='outer')
+                # optional: sanity check that the join didn't blow up
+                if len(merged_idx_reasoning) > len(old_idx_reasoning) + len(new_idx_reasoning):
+                    # this is a conservative check; it triggers if many-to-many occurred
+                    print(f"Warning: merged size {len(merged_idx_reasoning)} > old+new ({len(old_idx_reasoning)}+{len(new_idx_reasoning)}) — check duplicate keys!")
+                merged_df_reasoning = merged_idx_reasoning.reset_index()
+            else:
+                merged_df_reasoning = new_df_reasoning
+            # Save results
+            merged_df_reasoning.to_csv(results_file_reasoning, index=False)
+            # Save accuracy separately in a summary file
+            accuracy_file_reasoning = os.path.join(result_dir, f'{test_name}_reasoning_chain_accuracy.csv')
+            if os.path.exists(accuracy_file_reasoning):
+                acc_df_reasoning = pd.read_csv(accuracy_file_reasoning)
+            else:
+                acc_df_reasoning = pd.DataFrame(columns=['iteration', 'accuracy'])
+            # Add new accuracy
+            new_row_reasoning = pd.DataFrame({'iteration': [iter_num], 'accuracy': [accuracy_reasoning]})
+            acc_df_reasoning = pd.concat([acc_df_reasoning, new_row_reasoning], ignore_index=True)
+            acc_df_reasoning.to_csv(accuracy_file_reasoning, index=False)    
 
         accuracy_multiple_files[test_name] = accuracy
         correct_multiple_files[test_name] = correct

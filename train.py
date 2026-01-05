@@ -119,6 +119,7 @@ llama_model_name = "EleutherAI/pythia-1b"  # HuggingFace model identifier (e.g.,
 simple=False
 random_A=False
 random_C=False
+reasoning_chain=False
 
 use_lora = False # use lora (from minLoRA)
 print_interval = 2  # if we're using gpt-2 model, I want to see it prompted on text

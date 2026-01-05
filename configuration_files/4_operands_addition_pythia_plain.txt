@@ -61,8 +61,8 @@ dtype = 'bfloat16'  # Use bfloat16 for efficiency
 compile = True  # Use PyTorch 2.0 compile
 
 # ===== Paths ===== #
-out_dir = '/content/drive/MyDrive/addition_1/4_operands_0_to_999_uniform/pythia_out_plain'
-data_dir = '/content/drive/MyDrive/addition/data/4_operands_0_to_999_uniform/'
+out_dir = '/home/ubuntu/darshuswest2/result/4_operands_0_to_999_uniform/pythia_out_plain'
+data_dir = '/home/ubuntu/darshuswest2/4_operands_0_to_999_uniform/'
 
 # to edit: training data
 train_data_name = 'train.txt'
