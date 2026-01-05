@@ -517,8 +517,9 @@ else:
 # Expose in config for other code to use
 config['pad_id'] = pad_id
 config['eos_id'] = eos_id
-config['dollar_token_id'] = dollar_token_id
-config['stop_set'] = set([eos_id, dollar_token_id])
+if use_llama:
+  config['dollar_token_id'] = dollar_token_id
+  config['stop_set'] = set([eos_id, dollar_token_id])
 
 meta_vocab_size = meta['vocab_size']
 print(f"Using vocabulary size: {meta_vocab_size}")
@@ -671,8 +672,8 @@ else:
         best_val_loss = checkpoint['best_val_loss']
         if 'best_perplexity' in checkpoint.keys():
             best_perplexity = checkpoint['best_perplexity']
-    if 'best_accuracy' in checkpoint.keys():
-        best_accuracy = checkpoint['best_accuracy']
+        if 'best_accuracy' in checkpoint.keys():
+          best_accuracy = checkpoint['best_accuracy']
 
 scaler = torch.cuda.amp.GradScaler(enabled=(dtype == 'float16'))
 
