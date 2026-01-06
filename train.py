@@ -1003,7 +1003,7 @@ while iter_num < max_iters:
         train_accuracy = None
         if eval_addition_train:
             config['start'] = f"FILE:{train_data_test_path}"
-            train_accuracy, correct, incorrect = evaluate_addition_batch(
+            train_results = evaluate_addition_batch(
                 config, model, ctx, 
                 encode=lambda x: encode_addition(x, meta),
                 decode=lambda x: decode_addition(x, meta), 
@@ -1016,6 +1016,11 @@ while iter_num < max_iters:
                 mode=mode,
                 batch_method=batch_method
             )
+            if len(train_results)==4:
+                train_accuracy, correct, incorrect, final_accuracy = train_results
+            else:
+                train_accuracy, correct, incorrect = train_results
+                final_accuracy = None
             
             # Add train accuracy to wandb_dict
             wandb_dict["train/accuracy"] = train_accuracy
@@ -1054,6 +1059,7 @@ while iter_num < max_iters:
         result_dict['test_acc'].append(test_accuracy)
         result_dict['train_acc'].append(train_accuracy)
         
+        
         # Save results to CSV after each evaluation
         result_df = pd.DataFrame(result_dict)
         result_df.to_csv(os.path.join(result_dir, 'training_metrics.csv'), index=False)
@@ -1089,7 +1095,7 @@ for test_file in test_files:
 
 if eval_addition:
     config['start'] = f"FILE:{standard_test_file_path}"
-    test_accuracy, correct, incorrect = evaluate_addition_batch(
+    test_results = evaluate_addition_batch(
         config, model, ctx, 
         encode=lambda x: encode_addition(x, meta),
         decode=lambda x: decode_addition(x, meta), 
@@ -1103,6 +1109,11 @@ if eval_addition:
         mode=mode,
         batch_method=batch_method
     )
+    if len(test_results) == 4:
+        test_accuracy, correct, incorrect, final_accuracy = test_results
+    else:   
+        test_accuracy, correct, incorrect = test_results
+    
     import csv
     # Save correct examples
     correct_path = os.path.join(result_dir, 'correct_examples.csv')
@@ -1126,7 +1137,20 @@ if eval_addition:
 
 if eval_addition_train:
     config['start'] = f"FILE:{train_data_test_path}"
-    train_accuracy, correct, incorrect = evaluate_addition_batch(
+    train_results = evaluate_addition_batch(
+        config, model, ctx, 
+        encode=lambda x: encode_addition(x, meta),
+        decode=lambda x: decode_addition(x, meta), 
+        verbose=False, 
+        num_digit=num_digit, 
+        zero_pad=zero_pad,
+        data_type=data_type, 
+        operator=operator, 
+        data_format=data_format,
+        mode=mode,
+        batch_method=batch_method
+    )
+    train_accuracy, correct, incorrect = train_results[:3]
         config, model, ctx, 
         encode=lambda x: encode_addition(x, meta),
         decode=lambda x: decode_addition(x, meta), 

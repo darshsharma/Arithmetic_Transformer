@@ -81,3 +81,4 @@ main_test_name = "test_transformed_1"
 mode = "read_gold_as_str"
 reasoning_chain = True
 reasoning = True
+mi_measurement = False

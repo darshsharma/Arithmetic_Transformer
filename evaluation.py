@@ -118,7 +118,10 @@ def prepare_addition_batches(config, encode, num_digit=3, zero_pad=False, binary
         else:
             prompt_str = '\n' + line.split('=')[0] + '='      # "123+456="
         prompt_ids = encode(prompt_str)
-        x = torch.tensor(prompt_ids, dtype=torch.long, device=device)[None, ...]
+        if isinstance(prompt_ids, torch.Tensor):
+            x = prompt_ids.detach().clone().to(dtype=torch.long, device=device)[None, ...]
+        else:
+            x = torch.tensor(prompt_ids, dtype=torch.long, device=device)[None, ...]
         prompt_length = x.size(1)
 
         # parse out gold for evaluation later
