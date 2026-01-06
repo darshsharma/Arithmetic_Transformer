@@ -218,7 +218,7 @@ def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
                         else:
                             c_hat = outcome.split('=',1)[1].split('$')[0].strip()
 
-                        if data_format == "reverse":
+                        if data_format == "reverse" and not config.get("reasoning", False):
                             sign = ''
                             if c_hat.startswith('-') or c_hat.startswith('+'):
                                 sign = c_hat[0]
@@ -242,8 +242,42 @@ def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
 
     accuracy = correct / total * 100
     
-
+    if config.get("reasoning", False):
+        correct_final = 0
+        for _, result, _, c_hat in correct_examples + incorrect_examples:
+            # result and c_hat are the full strings e.g. "1+1=10(0)+2=2" (or similar if read_gold_as_str)
+            # User wants to compare the LAST output after =
+            # Note: in read_gold_as_str mode, result is the string after the first =, e.g. "10(0)+2=2"
+            # c_hat is also the string after the first =, e.g. "99(9)+2=2"
+            
+            # Defensive splitting
+            try:
+                # Get final answer from result
+                if '=' in result:
+                    res_final = result.rsplit('=', 1)[1].strip()
+                else:
+                    res_final = result.strip()
+                
+                # Get final answer from c_hat
+                if '=' in c_hat:
+                    chat_final = c_hat.rsplit('=', 1)[1].strip()
+                else:
+                    chat_final = c_hat.strip()
+                
+                if res_final == chat_final:
+                    correct_final += 1
+            except Exception:
+                # If splitting fails (e.g. malformed output), valid match is impossible unless identical strings (already covered by correct_examples)
+                # But here we are in the "final match" check. If we can't parse, it's incorrect.
+                pass
+                
+        final_accuracy = correct_final / total * 100
+    else:
+        final_accuracy = None
+        
     model.train()
+    if config.get("reasoning", False):
+        return accuracy, correct_examples, incorrect_examples, final_accuracy
     return accuracy, correct_examples, incorrect_examples
 
 # Keep the original function for backward compatibility, but make it use the new functions
@@ -298,20 +332,35 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
         config['start'] = f"FILE:{test_file}"
         
         # Run evaluation
-        accuracy, correct, incorrect = evaluate_addition_batch(
+        eval_result = evaluate_addition_batch(
             config, model, ctx, encode=encode, decode=decode,
             verbose=verbose, num_digit=num_digit, zero_pad=zero_pad,
             data_type=data_type, operator=operator,
             data_format=data_format, analyze=analyze, mode=mode, batch_method=batch_method
         )
+        
+        if len(eval_result) == 4:
+            accuracy, correct, incorrect, final_accuracy = eval_result
+        else:
+            accuracy, correct, incorrect = eval_result
+            final_accuracy = None
+
         if config.get('reasoning_chain', False):
             test_names.append(f"{test_name}_reasoning_chain")
-            accuracy_reasoning, correct_reasoning, incorrect_reasoning = evaluate_addition_batch(
+            eval_result_reasoning = evaluate_addition_batch(
                 config, model, ctx, encode=encode, decode=decode,
                 verbose=verbose, num_digit=num_digit, zero_pad=zero_pad,
                 data_type=data_type, operator=operator,
-                data_format=data_format, analyze=analyze, mode=mode, batch_method=batch_method
+                data_format=data_format, analyze=analyze, mode=mode, batch_method=batch_method, reasoning_chain=True
             )
+            # Not expecting dual accuracy for reasoning_chain=True based on user request (only reasoning=True)
+            # But defending just in case
+            if len(eval_result_reasoning) == 4:
+                accuracy_reasoning, correct_reasoning, incorrect_reasoning, final_accuracy_reasoning = eval_result_reasoning
+            else:
+                accuracy_reasoning, correct_reasoning, incorrect_reasoning = eval_result_reasoning
+                final_accuracy_reasoning = None
+
             accuracy_multiple_files[f"{test_name}_reasoning_chain"] = accuracy_reasoning
             correct_multiple_files[f"{test_name}_reasoning_chain"] = correct_reasoning
             incorrect_multiple_files[f"{test_name}_reasoning_chain"] = incorrect_reasoning
@@ -355,8 +404,19 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
                 acc_df_reasoning = pd.read_csv(accuracy_file_reasoning)
             else:
                 acc_df_reasoning = pd.DataFrame(columns=['iteration', 'accuracy'])
+            
             # Add new accuracy
-            new_row_reasoning = pd.DataFrame({'iteration': [iter_num], 'accuracy': [accuracy_reasoning]})
+            # If final accuracy exists, save it too
+            new_row_data = {'iteration': [iter_num], 'accuracy': [accuracy_reasoning]}
+            if final_accuracy_reasoning is not None:
+                new_row_data['final_accuracy'] = [final_accuracy_reasoning]
+                
+            new_row_reasoning = pd.DataFrame(new_row_data)
+            # Check if existing df has final_accuracy column, if not add it
+            if 'final_accuracy' in new_row_data and 'final_accuracy' not in acc_df_reasoning.columns:
+                 # Add column with NaNs
+                 acc_df_reasoning['final_accuracy'] = pd.NA
+                 
             acc_df_reasoning = pd.concat([acc_df_reasoning, new_row_reasoning], ignore_index=True)
             acc_df_reasoning.to_csv(accuracy_file_reasoning, index=False)    
 
@@ -419,7 +479,15 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
             acc_df = pd.DataFrame(columns=['iteration', 'accuracy'])
         
         # Add new accuracy
-        new_row = pd.DataFrame({'iteration': [iter_num], 'accuracy': [accuracy]})
+        new_row_data = {'iteration': [iter_num], 'accuracy': [accuracy]}
+        if final_accuracy is not None:
+            new_row_data['final_accuracy'] = [final_accuracy]
+            
+        new_row = pd.DataFrame(new_row_data)
+        
+        if 'final_accuracy' in new_row_data and 'final_accuracy' not in acc_df.columns:
+            acc_df['final_accuracy'] = pd.NA
+            
         acc_df = pd.concat([acc_df, new_row], ignore_index=True)
         acc_df.to_csv(accuracy_file, index=False)
     
