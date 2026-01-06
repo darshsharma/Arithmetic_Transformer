@@ -180,6 +180,8 @@ def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
         with torch.no_grad():
             with ctx:
                 eos_id = config['eos_id']
+                if reasoning_chain:
+                    max_new_tokens = num_digit + 2
                 y = model.generate(
                     x,
                     max_new_tokens,

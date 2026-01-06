@@ -79,11 +79,17 @@ def create_reasoning_data_2(file_path, output_path):
             units.append(str(u))
             # 3. Create the transformed line
 
-        breakdown = (f"1({'+'.join(units)})+"
+        breakdown = (
+            f"100({'+'.join(hundreds)})+"
             f"10({'+'.join(tens)})+"
-            f"100({'+'.join(hundreds)})"
+            f"1({'+'.join(units)})"
         )
-        transformed_line = f"{left_side}={breakdown}={result}$"    
+
+        breakdown_2 = (f"100({sum([int(h) for h in hundreds])})+"
+                        f"10({sum([int(t) for t in tens])})+"
+                        f"1({sum([int(u) for u in units])})")
+
+        transformed_line = f"{left_side}={breakdown}={breakdown_2}={result}$"    
 
         transformed_data.append(transformed_line)
     with open(output_path, 'w') as f:
@@ -99,7 +105,7 @@ def main():
     parsed_args = parser.parse_args()
     if parsed_args.mode == "plain":
         create_reasoning_data_1(parsed_args.input_file_path, parsed_args.output_file_path)
-    elif parsed_args.mode == "reverse":
+    elif parsed_args.mode == "plain_v2":
         create_reasoning_data_2(parsed_args.input_file_path, parsed_args.output_file_path)
 
 if __name__ == "__main__":

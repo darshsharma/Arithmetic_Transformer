@@ -1150,19 +1150,10 @@ if eval_addition_train:
         mode=mode,
         batch_method=batch_method
     )
-    train_accuracy, correct, incorrect = train_results[:3]
-        config, model, ctx, 
-        encode=lambda x: encode_addition(x, meta),
-        decode=lambda x: decode_addition(x, meta), 
-        verbose=False, 
-        num_digit=num_digit, 
-        zero_pad=zero_pad,
-        data_type=data_type, 
-        operator=operator, 
-        data_format=data_format,
-        mode=mode,
-        batch_method=batch_method
-    )
+    if len(train_results)==4:
+        train_accuracy, correct, incorrect, final_accuracy = train_results
+    else:
+        train_accuracy, correct, incorrect = train_results
     
     
 test_names, accuracy_multiple_file, correct_examples_multiple_file, incorrect_examples_multiple_file = evaluate_multiple_files(
