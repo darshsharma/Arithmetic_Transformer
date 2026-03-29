@@ -7,11 +7,11 @@ Dispatches to individual generation scripts under /data_generation_script/indivi
 Usage:
     python data_generate.py --task <task> --num_operands <n> --experiment_name <name> \
         [--train_size N] [--test_size N] [--val_size N] \
-        [--train_eval] [--sample-size N] [--generate_reverse] [--randomize {units,tens,hundreds,thousands}]
+        [--train_eval] [--sample-size N] [--generate_reverse] [--randomize {units,tens,hundreds,thousands}] [--seed N]
 
 Example:
     python data_generate.py --task addition --num_operands 4 --experiment_name 4_operands_0_to_999_uniform \
-        --train_size 1000000 --test_size 10000 --val_size 10000 --train_eval True --sample-size 10000 --generate_reverse True
+        --train_size 1000000 --test_size 10000 --val_size 10000 --train_eval True --sample-size 10000 --generate_reverse True --seed 42
 
 Notes:
  - --task (required): one of the supported tasks (addition, multiplication, sorting, ...).
@@ -20,6 +20,7 @@ Notes:
  - --output_path / -o: optional explicit output directory (overrides default data/<experiment_name>).
  - --train_eval: if present/true, a train_eval file will be produced (sampling controlled by --sample-size).
  - --generate_reverse: if present/true, runs reverse_results.py on generated files at the end.
+ - --seed: addition-only optional seed forwarded to the underlying addition generator.
 
 This script runs the target generator as a separate Python process and passes the chosen output path as --output_dir (same format as addition_gen.py).
 If --output_path is omitted, default is parent_dir/data/{experiment_name}.
@@ -120,11 +121,26 @@ def main():
         ),
     )
     parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Addition-only optional seed forwarded to the addition generator.",
+    )
+    parser.add_argument(
         "--experiment_name",
         required=True,
         help=(
             "Name of the experiment. If --output_path is not specified, "
             "the default output directory will be /data/{experiment_name}."
+        ),
+    )
+    parser.add_argument(
+        "--output_path",
+        "-o",
+        default=None,
+        help=(
+            "Optional explicit output directory. If provided, generated files are written there "
+            "instead of data/<experiment_name>."
         ),
     )
     parser.add_argument(
@@ -220,6 +236,9 @@ def main():
     if args.reasoning_mode is not None and args.task != "addition":
         print("Error: --reasoning_mode is only supported when --task is addition.", file=sys.stderr)
         sys.exit(2)
+    if args.seed is not None and args.task != "addition":
+        print("Error: --seed is only supported when --task is addition.", file=sys.stderr)
+        sys.exit(2)
 
     # Validate num_operands bounds: generators accept up to 6 operands for digit-based tasks.
     if args.num_operands is None:
@@ -243,7 +262,10 @@ def main():
     task = args.task
     experiment_name = args.experiment_name
 
-    output_path = os.path.abspath(os.path.join(default_data_dir(), experiment_name))
+    if args.output_path:
+        output_path = os.path.abspath(args.output_path)
+    else:
+        output_path = os.path.abspath(os.path.join(default_data_dir(), experiment_name))
     is_comparison = (task == "comparison")
     is_sorting = (task == "sorting")
     needs_test_subdir = is_comparison or is_sorting
@@ -329,6 +351,9 @@ def main():
             gen_cmd += ["--b_max_digits", str(args.b_max_digits)]
         if args.max_digits is not None:
             gen_cmd += ["--max_digits", str(args.max_digits)]
+
+    if task == "addition" and args.seed is not None:
+        gen_cmd += ["--seed", str(args.seed)]
 
 
     try:

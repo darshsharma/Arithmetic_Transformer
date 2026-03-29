@@ -42,6 +42,7 @@ def parse_args():
     p.add_argument("--num_operands", type=int, default=DEFAULT_NUM_OPERANDS,
                    help="Number of operands (each operand is a 3-digit number in 0..999)")
     p.add_argument("--output_dir", type=str, default=".", help="Directory to write train.txt, test.txt, val.txt")
+    p.add_argument("--seed", type=int, default=SEED, help="Random seed for reproducibility")
     return p.parse_args()
 
 def main():
@@ -66,8 +67,8 @@ def main():
 
     # ensure output directory exists
     OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-    random.seed(SEED)
+    print(f"Seed set to {args.seed} for reproducibility.")
+    random.seed(args.seed)
 
     # Sample unique indices in [0, max_available)
     sampled = random.sample(range(max_available), total_needed)

@@ -333,6 +333,14 @@ def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
 
     # --- end new helpers ---
 
+    def extract_normalized_final(raw: str) -> str:
+        if raw is None:
+            return ""
+        s = str(raw).strip()
+        if '=' in s:
+            s = s.rsplit('=', 1)[1].strip()
+        return normalize_by_data_format(s, data_format)
+
     for batch_idx in tqdm(range(len(batch_list))):
         batch = batch_list[batch_idx]
         x_list = [input_tuple[0] for input_tuple in batch]
@@ -436,30 +444,12 @@ def evaluate_addition_precomputed(config, model, ctx, decode, batch_list, total,
     if config.get("reasoning", False):
         correct_final = 0
         for _, result, _, c_hat in correct_examples + incorrect_examples:
-            # result and c_hat are the full strings e.g. "1+1=10(0)+2=2" (or similar if read_gold_as_str)
-            # User wants to compare the LAST output after =
-            # Note: in read_gold_as_str mode, result is the string after the first =, e.g. "10(0)+2=2"
-            # c_hat is also the string after the first =, e.g. "99(9)+2=2"
-            
-            # Defensive splitting
             try:
-                # Get final answer from result
-                if '=' in result:
-                    res_final = result.rsplit('=', 1)[1].strip()
-                else:
-                    res_final = result.strip()
-                
-                # Get final answer from c_hat
-                if '=' in c_hat:
-                    chat_final = c_hat.rsplit('=', 1)[1].strip()
-                else:
-                    chat_final = c_hat.strip()
-                
+                res_final = extract_normalized_final(result)
+                chat_final = extract_normalized_final(c_hat)
                 if res_final == chat_final:
                     correct_final += 1
             except Exception:
-                # If splitting fails (e.g. malformed output), valid match is impossible unless identical strings (already covered by correct_examples)
-                # But here we are in the "final match" check. If we can't parse, it's incorrect.
                 pass
                 
         final_accuracy = correct_final / total * 100
@@ -514,6 +504,41 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
     accuracy_multiple_files = {}
     correct_multiple_files = {}
     incorrect_multiple_files = {}
+    primary_reasoning_chain = config.get('reasoning_eval_only', False)
+
+    def normalize_final_result(value):
+        if value is None:
+            return ""
+        s = str(value).strip()
+        if '=' in s:
+            s = s.rsplit('=', 1)[1].strip()
+
+        sign = ''
+        if s.startswith('-') or s.startswith('+'):
+            sign = s[0]
+            core = s[1:]
+        else:
+            core = s
+
+        core = core.replace(' ', '')
+        df = (data_format or "").lower()
+
+        if df in ("plain", "normal", "1234", ""):
+            normalized_core = core
+        elif df in ("reverse", "reversed", "4321"):
+            normalized_core = core[::-1]
+        else:
+            perm = parse_perm_spec(str(data_format))
+            if perm is not None and len(perm) == len(core) and set(perm) == set(range(1, len(core) + 1)):
+                out = [''] * len(core)
+                for j, ch in enumerate(core):
+                    target_idx = perm[j] - 1
+                    out[target_idx] = ch
+                normalized_core = ''.join(out) if '' not in out else core
+            else:
+                normalized_core = core
+
+        return (sign + normalized_core) if sign else normalized_core
 
     for test_file in test_files:
     
@@ -529,7 +554,8 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
             config, model, ctx, encode=encode, decode=decode,
             verbose=verbose, num_digit=num_digit,
             operator=operator, data_format=data_format,
-            mode=mode, batch_method=batch_method, randomize=randomize
+            mode=mode, batch_method=batch_method, randomize=randomize,
+            reasoning_chain=primary_reasoning_chain
         )
 
         if len(eval_result) == 4:
@@ -538,7 +564,7 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
             accuracy, correct, incorrect = eval_result
             final_accuracy = None
 
-        if config.get('reasoning_chain', False):
+        if config.get('reasoning_chain', False) and not primary_reasoning_chain:
             test_names.append(f"{test_name}_reasoning_chain")
             eval_result_reasoning = evaluate_addition_batch(
                 config, model, ctx, encode=encode, decode=decode,
@@ -611,6 +637,30 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
                  
             acc_df_reasoning = pd.concat([acc_df_reasoning, new_row_reasoning], ignore_index=True)
             acc_df_reasoning.to_csv(accuracy_file_reasoning, index=False)    
+
+            if config.get('reasoning', False):
+                final_results_file_reasoning = os.path.join(result_dir, f'{test_name}_reasoning_chain_final_results.csv')
+                final_examples_reasoning = correct_reasoning + incorrect_reasoning
+                final_examples_reasoning.sort(key=lambda x: x[0])
+                final_df_reasoning = pd.DataFrame({
+                    'operands': [ex[0] for ex in final_examples_reasoning],
+                    'actual': [normalize_final_result(ex[1]) for ex in final_examples_reasoning],
+                    f'pred_iter_{iter_num}': [normalize_final_result(ex[3]) for ex in final_examples_reasoning],
+                })
+                if os.path.exists(final_results_file_reasoning):
+                    old_final_df_reasoning = pd.read_csv(final_results_file_reasoning, dtype={'operands': str, 'actual': str}, low_memory=False)
+                    for df in (old_final_df_reasoning, final_df_reasoning):
+                        df['operands'] = df['operands'].astype(str).str.strip()
+                        df['actual'] = df['actual'].fillna('').astype(str).str.strip()
+                    old_final_df_reasoning = old_final_df_reasoning.drop_duplicates(subset=['operands', 'actual'])
+                    final_df_reasoning = final_df_reasoning.drop_duplicates(subset=['operands', 'actual'])
+                    merged_final_reasoning = old_final_df_reasoning.set_index(['operands', 'actual']).join(
+                        final_df_reasoning.set_index(['operands', 'actual']),
+                        how='outer'
+                    ).reset_index()
+                else:
+                    merged_final_reasoning = final_df_reasoning
+                merged_final_reasoning.to_csv(final_results_file_reasoning, index=False)
 
         accuracy_multiple_files[test_name] = accuracy
         correct_multiple_files[test_name] = correct
@@ -688,5 +738,31 @@ def evaluate_multiple_files(config, model, ctx, encode, decode, test_files, iter
             
         acc_df = pd.concat([acc_df, new_row], ignore_index=True)
         acc_df.to_csv(accuracy_file, index=False)
+
+        if config.get('reasoning', False):
+            final_results_file = os.path.join(result_dir, f'{test_name}_final_results.csv')
+            final_examples = correct + incorrect
+            final_examples.sort(key=lambda x: x[0])
+            final_df = pd.DataFrame({
+                'operands': [ex[0] for ex in final_examples],
+                'actual': [normalize_final_result(ex[1]) for ex in final_examples],
+                f'pred_iter_{iter_num}': [normalize_final_result(ex[3]) for ex in final_examples],
+            })
+
+            if os.path.exists(final_results_file):
+                old_final_df = pd.read_csv(final_results_file, dtype={'operands': str, 'actual': str}, low_memory=False)
+                for df in (old_final_df, final_df):
+                    df['operands'] = df['operands'].astype(str).str.strip()
+                    df['actual'] = df['actual'].fillna('').astype(str).str.strip()
+                old_final_df = old_final_df.drop_duplicates(subset=['operands', 'actual'])
+                final_df = final_df.drop_duplicates(subset=['operands', 'actual'])
+                merged_final_df = old_final_df.set_index(['operands', 'actual']).join(
+                    final_df.set_index(['operands', 'actual']),
+                    how='outer'
+                ).reset_index()
+            else:
+                merged_final_df = final_df
+
+            merged_final_df.to_csv(final_results_file, index=False)
     
     return test_names, accuracy_multiple_files, correct_multiple_files, incorrect_multiple_files

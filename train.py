@@ -122,6 +122,7 @@ llama_model_name = "EleutherAI/pythia-1b"  # HuggingFace model identifier (e.g.,
 
 reasoning_chain=False
 reasoning=False
+reasoning_eval_only = False
 
 use_lora = False # use lora (from minLoRA)
 print_interval = 2  # if we're using gpt-2 model, I want to see it prompted on text
@@ -338,6 +339,7 @@ if master_process:
 #torch.backends.cudnn.benchmark = False # cudnn auto-tuner
 #torch.backends.cudnn.deterministic = True # cudnn auto-tuner
 # this is probably overkill but seed everything again
+print(f"Setting random seed to {seed} for reproducibility.")
 set_seed(seed)
 
 device_type = 'cuda' if 'cuda' in device else 'cpu' # for later use in torch.autocast
@@ -946,7 +948,8 @@ while iter_num < max_iters:
                 data_format=data_format,
                 mode=mode,
                 batch_method=batch_method,
-                randomize=randomize
+                randomize=randomize,
+                reasoning_chain=config.get('reasoning_eval_only', False)
             )
             if len(train_results) == 4:
                 train_accuracy, correct, incorrect, final_accuracy = train_results
