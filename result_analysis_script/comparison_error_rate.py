@@ -39,7 +39,7 @@ LABEL_CHARS = ['<', '>', '=']
 # Example:
 #   LEGEND_NAMES = ['baseline', 'modelA', 'modelB']
 # or leave None to use the CSV basenames as legend labels.
-LEGEND_NAMES = ['Thousands different only', 'Hundreds different only', 'Tens different only', 'Units different only']
+LEGEND_NAMES = None
 # LEGEND_NAMES = ['No condition (1000-9999 uniform)', 'Thousands equal', 'Thousands, hundreds equal', 'Thousands, hundreds, tens equal', 'All digits equal']
 
 # Whether to draw markers on each data point. Use None for no marker (default), or e.g. 'o', 's', '^'
@@ -63,6 +63,30 @@ FONT_SIZE_XY_LABEL = 26
 FONT_SIZE_TICKS = 24
 FONT_SIZE_LEGEND = 24
 # -------------------------
+
+def humanize_stem(stem):
+    stem = stem.replace("_results", "")
+    stem = stem.replace("_", " ").strip()
+    if not stem:
+        return stem
+    return stem[0].upper() + stem[1:]
+
+def infer_legend_label(path):
+    stem = os.path.splitext(os.path.basename(path))[0]
+
+    if stem.endswith("_diff_only_results"):
+        place = stem[:-len("_diff_only_results")]
+        return f"{humanize_stem(place)} different only"
+    if stem.endswith("_strict_results"):
+        place = stem[:-len("_strict_results")]
+        return f"{humanize_stem(place)} strict"
+    if stem.endswith("_results"):
+        core = stem[:-len("_results")]
+        if core == "equal":
+            return "All digits equal"
+        return humanize_stem(core)
+
+    return humanize_stem(stem)
 
 def extract_label(cell):
     """
@@ -366,7 +390,7 @@ def main():
         try:
             ordered, basename, dirname = compute_error_rates_for_file(p, max_step=args.max_step, interval=args.interval)
             # choose legend label: from LEGEND_NAMES if provided, otherwise basename
-            legend_label = LEGEND_NAMES[idx] if LEGEND_NAMES is not None else basename
+            legend_label = LEGEND_NAMES[idx] if LEGEND_NAMES is not None else infer_legend_label(p)
             file_results.append((ordered, legend_label, dirname))
             if first_dir is None:
                 first_dir = dirname

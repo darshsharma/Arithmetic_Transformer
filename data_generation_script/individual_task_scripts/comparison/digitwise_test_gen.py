@@ -1,36 +1,44 @@
 #!/usr/bin/env python3
 """
-Generate 9 .txt files, each containing 1000 comparison examples.
+Generate digitwise comparison test files for n-digit numbers.
 
-Line format:
-    a1a2a3a4,b1b2b3b4#>$
+For n digits, this creates:
+  - one unconstrained file for each position name
+  - one strict file where the first differing digit is forced at that position
+  - one equal.txt file with identical numbers
 
-Files and sampling rules:
-- thousands.txt:         no condition, sample each number uniformly from 1000..9999
-- thousands_strict.txt:  a1 != b1 (first digits different)
-- hundreds.txt:          a1 = b1
-- hundreds_strict.txt:   a1 = b1, a2 != b2
-- tens.txt:              a1 = b1, a2 = b2
-- tens_strict.txt:       a1 = b1, a2 = b2, a3 != b3
-- units.txt:             a1 = b1, a2 = b2, a3 = b3 (last digits sampled freely)
-- units_strict.txt:      a1 = b1, a2 = b2, a3 = b3, a4 != b4
-- equal.txt:             identical numbers (all digits equal)
-
-Usage:
-    python digitwise_test_gen.py [--outdir out] [--seed 123]
+Examples:
+  n=3 -> hundreds, tens, units, plus strict variants, plus equal
+  n=4 -> thousands, hundreds, tens, units, plus strict variants, plus equal
+  n=5 -> ten_thousands, thousands, hundreds, tens, units, plus strict variants, plus equal
 """
 import random
 import argparse
 from pathlib import Path
 
-def digits_to_int(d):
-    return d[0]*1000 + d[1]*100 + d[2]*10 + d[3]
+PLACE_NAMES_FROM_RIGHT = [
+    "units",
+    "tens",
+    "hundreds",
+    "thousands",
+    "ten_thousands",
+    "hundred_thousands",
+    "millions",
+]
 
 def rand_first():
     return random.randint(1, 9)
 
 def rand_digit():
     return random.randint(0, 9)
+
+def digits_to_str(digits):
+    return ''.join(str(digit) for digit in digits)
+
+def place_names(num_digits):
+    if num_digits > len(PLACE_NAMES_FROM_RIGHT):
+        raise ValueError(f"num_digits={num_digits} is not supported; max is {len(PLACE_NAMES_FROM_RIGHT)}")
+    return list(reversed(PLACE_NAMES_FROM_RIGHT[:num_digits]))
 
 def format_example(a, b):
     if a > b:
@@ -41,97 +49,57 @@ def format_example(a, b):
         cmp = '='
     return f"{a},{b}#{cmp}$"
 
-# Samplers for each file
-def sample_thousands():
-    a = random.randint(1000, 9999)
-    b = random.randint(1000, 9999)
-    return a, b
+def random_number_digits(num_digits):
+    return [rand_first()] + [rand_digit() for _ in range(num_digits - 1)]
 
-def sample_thousands_strict():
-    # a1 != b1
-    a1 = rand_first()
-    b1_choices = [d for d in range(1, 10) if d != a1]
-    b1 = random.choice(b1_choices)
-    a = digits_to_int([a1, rand_digit(), rand_digit(), rand_digit()])
-    b = digits_to_int([b1, rand_digit(), rand_digit(), rand_digit()])
-    return a, b
+def sample_with_shared_prefix(num_digits, shared_prefix_len, force_diff_at=None):
+    shared_prefix = []
+    for idx in range(shared_prefix_len):
+        shared_prefix.append(rand_first() if idx == 0 else rand_digit())
 
-def sample_hundreds():
-    # a1 = b1
-    d0 = rand_first()
-    a = digits_to_int([d0, rand_digit(), rand_digit(), rand_digit()])
-    b = digits_to_int([d0, rand_digit(), rand_digit(), rand_digit()])
-    return a, b
+    a_digits = shared_prefix[:]
+    b_digits = shared_prefix[:]
 
-def sample_hundreds_strict():
-    # a1=b1, a2 != b2
-    d0 = rand_first()
-    a2 = rand_digit()
-    b2_choices = [d for d in range(0, 10) if d != a2]
-    b2 = random.choice(b2_choices)
-    a = digits_to_int([d0, a2, rand_digit(), rand_digit()])
-    b = digits_to_int([d0, b2, rand_digit(), rand_digit()])
-    return a, b
+    for idx in range(shared_prefix_len, num_digits):
+        if idx == force_diff_at:
+            a_digit = rand_first() if idx == 0 else rand_digit()
+            choices = [digit for digit in range(1 if idx == 0 else 0, 10) if digit != a_digit]
+            b_digit = random.choice(choices)
+            a_digits.append(a_digit)
+            b_digits.append(b_digit)
+        else:
+            a_digits.append(rand_first() if idx == 0 else rand_digit())
+            b_digits.append(rand_first() if idx == 0 else rand_digit())
 
-def sample_tens():
-    # a1=b1, a2=b2
-    d0 = rand_first()
-    d1 = rand_digit()
-    a = digits_to_int([d0, d1, rand_digit(), rand_digit()])
-    b = digits_to_int([d0, d1, rand_digit(), rand_digit()])
-    return a, b
+    return digits_to_str(a_digits), digits_to_str(b_digits)
 
-def sample_tens_strict():
-    # a1=b1, a2=b2, a3 != b3
-    d0 = rand_first()
-    d1 = rand_digit()
-    a3 = rand_digit()
-    b3_choices = [d for d in range(0, 10) if d != a3]
-    b3 = random.choice(b3_choices)
-    a = digits_to_int([d0, d1, a3, rand_digit()])
-    b = digits_to_int([d0, d1, b3, rand_digit()])
-    return a, b
+def sample_equal(num_digits):
+    digits = random_number_digits(num_digits)
+    number = digits_to_str(digits)
+    return number, number
 
-def sample_units():
-    # a1=b1, a2=b2, a3=b3, last digits sampled freely (can be equal)
-    d0 = rand_first()
-    d1 = rand_digit()
-    d2 = rand_digit()
-    a = digits_to_int([d0, d1, d2, rand_digit()])
-    b = digits_to_int([d0, d1, d2, rand_digit()])
-    return a, b
+def build_samplers(num_digits):
+    samplers = {}
+    labels = place_names(num_digits)
 
-def sample_units_strict():
-    # a1=b1, a2=b2, a3=b3, a4 != b4
-    d0 = rand_first()
-    d1 = rand_digit()
-    d2 = rand_digit()
-    a4 = rand_digit()
-    b4_choices = [d for d in range(0, 10) if d != a4]
-    b4 = random.choice(b4_choices)
-    a = digits_to_int([d0, d1, d2, a4])
-    b = digits_to_int([d0, d1, d2, b4])
-    return a, b
+    for idx, label in enumerate(labels):
+        shared_prefix_len = idx
+        samplers[f"{label}.txt"] = (
+            lambda shared_prefix_len=shared_prefix_len: sample_with_shared_prefix(
+                num_digits=num_digits,
+                shared_prefix_len=shared_prefix_len,
+            )
+        )
+        samplers[f"{label}_strict.txt"] = (
+            lambda shared_prefix_len=shared_prefix_len: sample_with_shared_prefix(
+                num_digits=num_digits,
+                shared_prefix_len=shared_prefix_len,
+                force_diff_at=shared_prefix_len,
+            )
+        )
 
-def sample_equal():
-    d0 = rand_first()
-    d1 = rand_digit()
-    d2 = rand_digit()
-    d3 = rand_digit()
-    a = digits_to_int([d0, d1, d2, d3])
-    return a, a
-
-SAMPLERS = {
-    "thousands.txt": sample_thousands,
-    "thousands_strict.txt": sample_thousands_strict,
-    "hundreds.txt": sample_hundreds,
-    "hundreds_strict.txt": sample_hundreds_strict,
-    "tens.txt": sample_tens,
-    "tens_strict.txt": sample_tens_strict,
-    "units.txt": sample_units,
-    "units_strict.txt": sample_units_strict,
-    "equal.txt": sample_equal,
-}
+    samplers["equal.txt"] = lambda: sample_equal(num_digits)
+    return samplers
 
 def generate_file(path: Path, sampler, n=1000):
     with path.open("w", encoding="utf-8") as f:
@@ -161,22 +129,28 @@ def quick_stats(path: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--outdir", "-o", default=".", help="output directory for files")
+    parser.add_argument("--num_digits", type=int, default=4, help="number of digits in each operand")
+    parser.add_argument("--n", type=int, default=1000, help="examples per generated file")
     parser.add_argument("--seed", type=int, default=None, help="random seed for reproducibility")
     args = parser.parse_args()
+
+    if args.num_digits < 1:
+        raise ValueError("--num_digits must be >= 1")
 
     if args.seed is not None:
         random.seed(args.seed)
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    samplers = build_samplers(args.num_digits)
 
-    print("Generating 9 files (1000 examples each)...")
-    for fname, sampler in SAMPLERS.items():
+    print(f"Generating {len(samplers)} files ({args.n} examples each) for {args.num_digits}-digit comparison...")
+    for fname, sampler in samplers.items():
         path = outdir / fname
-        generate_file(path, sampler, n=1000)
+        generate_file(path, sampler, n=args.n)
 
     print("Done. Quick stats:")
-    for fname in SAMPLERS.keys():
+    for fname in samplers.keys():
         path = outdir / fname
         eq, gt, lt = quick_stats(path)
         print(f"{fname}: = {eq}, > {gt}, < {lt}")

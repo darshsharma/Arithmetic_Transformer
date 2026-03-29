@@ -34,6 +34,7 @@ import sys
 
 # Defaults must match the generator scripts (addition_gen.py)
 DEFAULT_NUM_OPERANDS = 4
+DEFAULT_NUM_DIGITS = 4
 DEFAULT_TRAIN_SIZE = 1_000_000
 DEFAULT_TEST_SIZE = 10_000
 DEFAULT_VAL_SIZE = 10_000
@@ -92,6 +93,13 @@ def main():
         choices=list(TASK_MAP.keys()),
         required=True,
         help="Which task to generate data for. Supported: " + ", ".join(TASK_MAP.keys()),
+    )
+
+    parser.add_argument(
+        "--num_digits",
+        type=int,
+        default=DEFAULT_NUM_DIGITS,
+        help="Comparison-only. Number of digits in each compared integer.",
     )
 
     parser.add_argument(
@@ -269,7 +277,7 @@ def main():
     is_comparison = (task == "comparison")
     is_sorting = (task == "sorting")
     needs_test_subdir = is_comparison or is_sorting
-    fixed_size_task = is_comparison or is_sorting
+    fixed_size_task = is_sorting
 
     # ensure output directory exists
     try:
@@ -323,13 +331,13 @@ def main():
     # Output dir flag differs by task/script
     if addition_randomize:
         gen_cmd += ["--out-dir", output_path, "--mask-digit", args.randomize]
-    elif fixed_size_task:
+    elif fixed_size_task or task == "comparison":
         gen_cmd += ["--outdir", output_path]
     else:
         gen_cmd += ["--output_dir", output_path]
 
-    # Sizes: pass to all tasks EXCEPT comparison & sorting (fixed sizes inside their scripts)
-    if not fixed_size_task:
+    # Sizes: pass to all tasks except sorting (fixed sizes inside its generator)
+    if not fixed_size_task and task != "comparison":
         gen_cmd += [
             "--train_size", str(args.train_size),
             "--test_size", str(args.test_size),
@@ -337,7 +345,11 @@ def main():
         ]
     else:
         # Optional clarity so users know flags are ignored
-        if (args.train_size != DEFAULT_TRAIN_SIZE) or (args.test_size != DEFAULT_TEST_SIZE) or (args.val_size != DEFAULT_VAL_SIZE):
+        if task == "sorting" and (
+            (args.train_size != DEFAULT_TRAIN_SIZE) or
+            (args.test_size != DEFAULT_TEST_SIZE) or
+            (args.val_size != DEFAULT_VAL_SIZE)
+        ):
             print(f"Note: {task} task uses fixed sizes from its generator; ignoring --train_size/--test_size/--val_size.")
 
     if task == "multiplication":
@@ -351,6 +363,14 @@ def main():
             gen_cmd += ["--b_max_digits", str(args.b_max_digits)]
         if args.max_digits is not None:
             gen_cmd += ["--max_digits", str(args.max_digits)]
+
+    if task == "comparison":
+        gen_cmd += [
+            "--num_digits", str(args.num_digits),
+            "--train_size", str(args.train_size),
+            "--test_size", str(args.test_size),
+            "--val_size", str(args.val_size),
+        ]
 
     if task == "addition" and args.seed is not None:
         gen_cmd += ["--seed", str(args.seed)]
@@ -403,6 +423,8 @@ def main():
                 extra_test_script,
                 "--outdir",
                 test_dir,
+                "--num_digits",
+                str(args.num_digits),
             ]
             try:
                 print("Generating additional comparison tests (single-digit-diff) into:", test_dir)
@@ -430,6 +452,8 @@ def main():
                 digitwise_script,
                 "--outdir",
                 test_dir,
+                "--num_digits",
+                str(args.num_digits),
             ]
             try:
                 print("Generating additional comparison tests (digitwise) into:", test_dir)

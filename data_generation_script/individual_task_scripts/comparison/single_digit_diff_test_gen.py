@@ -1,30 +1,40 @@
 #!/usr/bin/env python3
 """
-Generate 4 .txt files (1000 examples each) with specific digit-difference constraints.
+Generate one `*_diff_only.txt` file per digit position for n-digit comparison.
 
-Line format:
-    a1a2a3a4,b1b2b3b4#>$
-
-Files:
-- thousands_diff_only.txt : a1 != b1, a2 = b2, a3 = b3, a4 = b4
-- hundreds_diff_only.txt  : a1 = b1, a2 != b2, a3 = b3, a4 = b4
-- tens_diff_only.txt      : a1 = b1, a2 = b2, a3 != b3, a4 = b4
-- units_diff_only.txt     : a1 = b1, a2 = b2, a3 = b3, a4 != b4
-
-All sampling is uniform conditioned on the given constraints.
+For each file, exactly one digit position differs and all others match.
+Examples:
+  n=3 -> hundreds_diff_only, tens_diff_only, units_diff_only
+  n=4 -> thousands_diff_only, hundreds_diff_only, tens_diff_only, units_diff_only
+  n=5 -> ten_thousands_diff_only, thousands_diff_only, hundreds_diff_only, tens_diff_only, units_diff_only
 """
 import random
 import argparse
 from pathlib import Path
 
-def digits_to_int(d):
-    return d[0]*1000 + d[1]*100 + d[2]*10 + d[3]
+PLACE_NAMES_FROM_RIGHT = [
+    "units",
+    "tens",
+    "hundreds",
+    "thousands",
+    "ten_thousands",
+    "hundred_thousands",
+    "millions",
+]
 
 def rand_first():
     return random.randint(1, 9)
 
 def rand_digit():
     return random.randint(0, 9)
+
+def digits_to_str(digits):
+    return ''.join(str(digit) for digit in digits)
+
+def place_names(num_digits):
+    if num_digits > len(PLACE_NAMES_FROM_RIGHT):
+        raise ValueError(f"num_digits={num_digits} is not supported; max is {len(PLACE_NAMES_FROM_RIGHT)}")
+    return list(reversed(PLACE_NAMES_FROM_RIGHT[:num_digits]))
 
 def format_example(a, b):
     if a > b:
@@ -35,60 +45,28 @@ def format_example(a, b):
         cmp_sym = '='
     return f"{a},{b}#{cmp_sym}$"
 
-def sample_thousands_diff_only():
-    # a1 != b1, a2=b2, a3=b3, a4=b4
-    a1 = rand_first()
-    b1_choices = [d for d in range(1, 10) if d != a1]
-    b1 = random.choice(b1_choices)
-    shared_d2 = rand_digit()
-    shared_d3 = rand_digit()
-    shared_d4 = rand_digit()
-    a = digits_to_int([a1, shared_d2, shared_d3, shared_d4])
-    b = digits_to_int([b1, shared_d2, shared_d3, shared_d4])
-    return a, b
+def sample_diff_only(num_digits, diff_idx):
+    a_digits = []
+    b_digits = []
+    for idx in range(num_digits):
+        if idx == diff_idx:
+            a_digit = rand_first() if idx == 0 else rand_digit()
+            choices = [digit for digit in range(1 if idx == 0 else 0, 10) if digit != a_digit]
+            b_digit = random.choice(choices)
+        else:
+            a_digit = rand_first() if idx == 0 else rand_digit()
+            b_digit = a_digit
+        a_digits.append(a_digit)
+        b_digits.append(b_digit)
+    return digits_to_str(a_digits), digits_to_str(b_digits)
 
-def sample_hundreds_diff_only():
-    # a1=b1, a2 != b2, a3=b3, a4=b4
-    d0 = rand_first()
-    a2 = rand_digit()
-    b2_choices = [d for d in range(0, 10) if d != a2]
-    b2 = random.choice(b2_choices)
-    shared_d3 = rand_digit()
-    shared_d4 = rand_digit()
-    a = digits_to_int([d0, a2, shared_d3, shared_d4])
-    b = digits_to_int([d0, b2, shared_d3, shared_d4])
-    return a, b
-
-def sample_tens_diff_only():
-    # a1=b1, a2=b2, a3 != b3, a4=b4
-    d0 = rand_first()
-    d1 = rand_digit()
-    a3 = rand_digit()
-    b3_choices = [d for d in range(0, 10) if d != a3]
-    b3 = random.choice(b3_choices)
-    shared_d4 = rand_digit()
-    a = digits_to_int([d0, d1, a3, shared_d4])
-    b = digits_to_int([d0, d1, b3, shared_d4])
-    return a, b
-
-def sample_units_diff_only():
-    # a1=b1, a2=b2, a3=b3, a4 != b4
-    d0 = rand_first()
-    d1 = rand_digit()
-    d2 = rand_digit()
-    a4 = rand_digit()
-    b4_choices = [d for d in range(0, 10) if d != a4]
-    b4 = random.choice(b4_choices)
-    a = digits_to_int([d0, d1, d2, a4])
-    b = digits_to_int([d0, d1, d2, b4])
-    return a, b
-
-SAMPLERS = {
-    "thousands_diff_only.txt": sample_thousands_diff_only,
-    "hundreds_diff_only.txt": sample_hundreds_diff_only,
-    "tens_diff_only.txt": sample_tens_diff_only,
-    "units_diff_only.txt": sample_units_diff_only,
-}
+def build_samplers(num_digits):
+    samplers = {}
+    for diff_idx, label in enumerate(place_names(num_digits)):
+        samplers[f"{label}_diff_only.txt"] = (
+            lambda diff_idx=diff_idx: sample_diff_only(num_digits=num_digits, diff_idx=diff_idx)
+        )
+    return samplers
 
 def generate_file(path: Path, sampler, n=1000):
     with path.open("w", encoding="utf-8") as f:
@@ -118,21 +96,26 @@ def quick_stats(path: Path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--outdir", "-o", default=".", help="output directory")
+    parser.add_argument("--num_digits", type=int, default=4, help="number of digits in each operand")
     parser.add_argument("--seed", type=int, default=None, help="random seed (optional)")
     parser.add_argument("--n", type=int, default=1000, help="examples per file (default 1000)")
     args = parser.parse_args()
+
+    if args.num_digits < 1:
+        raise ValueError("--num_digits must be >= 1")
 
     if args.seed is not None:
         random.seed(args.seed)
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
+    samplers = build_samplers(args.num_digits)
 
-    for fname, sampler in SAMPLERS.items():
+    for fname, sampler in samplers.items():
         generate_file(outdir / fname, sampler, n=args.n)
 
     print("Generated files:")
-    for fname in SAMPLERS.keys():
+    for fname in samplers.keys():
         eq, gt, lt = quick_stats(outdir / fname)
         print(f"  {fname}: = {eq}, > {gt}, < {lt}")
 
